@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Bank Sandbox</title>
+  </head>
+  <body>
+    <h1>Bank Sandbox (Session)</h1>
+    <h2>Create Account</h2>
+    <form method="post" action="/bank/accounts">
+      <label>Owner: <input name="owner" required></label>
+      <label>Initial (e.g., 10.50): <input name="initial" required></label>
+      <button type="submit">Create</button>
+    </form>
+
+    <h2>Accounts</h2>
+    <ul>
+      <% accounts.forEach(a => { %>
+        <li>#<%= a.id %> <strong><%= a.owner %></strong> - balance: $<%= (a.balance_cents/100).toFixed(2) %></li>
+      <% }) %>
+    </ul>
+
+    <h2>Transfer</h2>
+    <form method="post" action="/bank/transfer">
+      <label>From: <select name="from">
+        <% accounts.forEach(a => { %>
+          <option value="<%= a.id %>">#<%= a.id %> - <%= a.owner %> ($<%= (a.balance_cents/100).toFixed(2) %>)</option>
+        <% }) %>
+      </select></label>
+      <label>To: <select name="to">
+        <% accounts.forEach(a => { %>
+          <option value="<%= a.id %>">#<%= a.id %> - <%= a.owner %> ($<%= (a.balance_cents/100).toFixed(2) %>)</option>
+        <% }) %>
+      </select></label>
+      <label>Amount: <input name="amount" required></label>
+      <label>Note: <input name="note"></label>
+      <button type="submit">Transfer</button>
+    </form>
+
+    <h2>Transactions</h2>
+    <table border="1" cellpadding="6">
+      <tr><th>ID</th><th>From</th><th>To</th><th>Amount</th><th>Status</th><th>When</th></tr>
+      <% transactions.forEach(t => { %>
+        <tr>
+          <td><%= t.id %></td>
+          <td><%= t.from_account %></td>
+          <td><%= t.to_account %></td>
+          <td>$<%= (t.amount_cents/100).toFixed(2) %></td>
+          <td><%= t.status %></td>
+          <td><%= t.created_at %></td>
+        </tr>
+      <% }) %>
+    </table>
+
+    <p><a href="/labs">Back to Labs</a></p>
+  </body>
+</html>

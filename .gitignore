@@ -1,0 +1,29 @@
+node_modules/
+src/data
+
+# Per-session / sqlite DB files
+session_*.db
+*.sqlite
+*.db
+
+# Environment
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+logs/
+*.log
+
+# Coverage
+coverage/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# npm lock
+package-lock.json

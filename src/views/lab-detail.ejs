@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title><%= lab.title %></title>
+  </head>
+  <body>
+    <h1><%= lab.title %></h1>
+    <p><%= lab.instructions %></p>
+    <form method="post" action="/labs/<%= lab.id %>/run">
+      <label>Answer: <input name="answer" /></label>
+      <button type="submit">Run</button>
+    </form>
+    <p><a href="/labs">Back</a></p>
+  </body>
+</html>

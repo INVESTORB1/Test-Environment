@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Transactions</title>
+    <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>Transactions</h1>
+    </header>
+    <div class="card">
+    <div class="table-responsive">
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>From (Account)</th>
+            <th>To (Account)</th>
+            <th class="right">Amount</th>
+            <th>Status</th>
+            <th>Note</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody id="txTbody">
+          <% tx.forEach(t => { %>
+            <tr>
+              <td class="muted"><%= t.id %></td>
+              <td>
+                <div><strong><%= t.from_owner_name || '—' %></strong></div>
+                <div class="muted small">Acct #<%= t.from_account %></div>
+              </td>
+              <td>
+                <div><strong><%= t.to_owner_name || '—' %></strong></div>
+                <div class="muted small">Acct #<%= t.to_account %></div>
+              </td>
+              <td class="right"><%= formatCurrency(t.amount_cents) %></td>
+              <td>
+                <% if (t.status === 'success') { %>
+                  <span class="badge badge-success">Success</span>
+                <% } else { %>
+                  <span class="badge badge-error"><%= t.status %></span>
+                <% } %>
+              </td>
+              <td><%= t.note || '' %></td>
+              <td><%= formatWhen(t.created_at) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+      <div id="txPager" class="pager" aria-hidden="true">
+        <button id="txPrev" class="btn btn-outline" aria-label="Previous transactions">◀</button>
+        <span id="txPageIndicator" class="muted">1</span>
+        <button id="txNext" class="btn btn-outline" aria-label="Next transactions">▶</button>
+      </div>
+    </div>
+    <p><a href="/bank">Back to Bank</a></p>
+    </div>
+  </body>
+</html>

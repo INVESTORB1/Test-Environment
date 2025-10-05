@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>My Attempts</title>
+  </head>
+  <body>
+    <h1>My Attempts</h1>
+    <table border="1" cellpadding="6">
+      <tr>
+        <th>ID</th>
+        <th>Lab</th>
+        <th>Success</th>
+        <th>Output</th>
+        <th>Duration ms</th>
+        <th>When</th>
+      </tr>
+      <% attempts.forEach(a => { %>
+        <tr>
+          <td><%= a.id %></td>
+          <td><%= a.lab_id %></td>
+          <td><%= a.success ? 'Yes' : 'No' %></td>
+          <td><%= a.output %></td>
+          <td><%= a.duration_ms %></td>
+          <td><%= a.created_at %></td>
+        </tr>
+      <% }) %>
+    </table>
+    <p><a href="/labs">Back to Labs</a></p>
+  </body>
+</html>

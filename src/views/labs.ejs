@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Labs</title>
+    <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>Labs</h1>
+    </header>
+    <div class="card">
+      <ul>
+        <% labs.forEach(l => { %>
+          <li><a href="/labs/<%= l.id %>"><%= l.title %></a> - <%= l.description %></li>
+        <% }) %>
+      </ul>
+      <p><a href="/">Home</a> | <a href="/attempts">My Attempts</a> | <a href="/bank">Bank Sandbox</a></p>
+    </div>
+  </body>
+</html>

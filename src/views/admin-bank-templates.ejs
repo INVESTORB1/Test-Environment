@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Admin - Bank Templates</title>
+    <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>Bank Templates</h1>
+    </header>
+    <div class="card">
+      <form method="post" action="/admin/bank/templates">
+        <label>Owner name: <input name="owner" required></label>
+        <label>Balance (Naira): <input name="balance" value="1000" required></label>
+        <button type="submit">Create Template Account</button>
+      </form>
+
+      <h3>Existing Templates</h3>
+      <ul>
+        <% templates.forEach(t => { %>
+          <li><%= t.id %> - <%= t.owner_name %> - ₦<%= (t.balance_cents/100).toFixed(2) %></li>
+        <% }) %>
+      </ul>
+    </div>
+    <p><a href="/admin">Back to Admin</a></p>
+  </body>
+</html>

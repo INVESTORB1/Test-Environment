@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Bank Sandbox</title>
+    <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>Bank Sandbox</h1>
+    </header>
+    <div class="grid">
+      <div class="card">
+        <% if (status) { %>
+          <div id="pageBanner" class="banner <%= status === 'success' ? 'banner-success' : 'banner-error' %>" role="status"><%= msg ? msg : (status === 'success' ? 'Transaction succeeded' : 'Transaction failed') %></div>
+        <% } %>
+        <div id="toast" class="toast" aria-hidden="true"></div>
+        <h2>Create Account</h2>
+        <form id="createAccountForm" method="post" action="/bank/accounts">
+          <label>Owner name: <input id="ownerInput" name="owner" type="text" required pattern="[A-Za-z '\-]+" inputmode="text" maxlength="80" title="Letters, spaces, hyphen and apostrophe only"></label>
+          <label>Initial balance (Naira): <input id="balanceInput" name="balance" value="1000" required inputmode="numeric"></label>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </form>
+
+        <h3>Accounts</h3>
+        <div class="table-responsive">
+          <table id="accountsTable" class="accounts-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Owner</th>
+                <th class="right">Balance</th>
+              </tr>
+            </thead>
+            <tbody id="accountsTbody">
+            <% accounts.forEach(a => { %>
+              <tr>
+                <td><strong><%= a.id %></strong></td>
+                <td><%= a.owner_name %></td>
+                <td class="right"><%= formatCurrency(a.balance_cents) %></td>
+              </tr>
+            <% }) %>
+            </tbody>
+          </table>
+          <div id="accountsPager" class="pager" aria-hidden="true">
+            <button id="accountsPrev" class="btn btn-outline" aria-label="Previous accounts">◀</button>
+            <span id="accountsPageIndicator" class="muted">1</span>
+            <button id="accountsNext" class="btn btn-outline" aria-label="Next accounts">▶</button>
+          </div>
+        </div>
+        <form id="resetForm" method="post" action="/bank/reset">
+          <button type="submit" class="btn btn-danger">Reset my sandbox</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Transfer</h2>
+        <form id="transferForm" method="post" action="/bank/transfer">
+          <label>From account:
+            <select name="from" class="account-select">
+                  <option value="" class="placeholder">Choose account</option>
+                  <% accounts.forEach(a => { %>
+                    <option value="<%= a.id %>"><%= a.id %> - <%= a.owner_name %> - <%= formatCurrency(a.balance_cents) %></option>
+                  <% }) %>
+            </select>
+          </label>
+          <label>To account:
+            <select name="to" class="account-select">
+              <option value="" class="placeholder">Choose account</option>
+              <% accounts.forEach(a => { %>
+                <option value="<%= a.id %>"><%= a.id %> - <%= a.owner_name %> - <%= formatCurrency(a.balance_cents) %></option>
+              <% }) %>
+            </select>
+          </label>
+          <label>Amount (Naira): <input name="amount" required></label>
+          <label>Note: <input name="note"></label>
+          <button type="submit">Transfer</button>
+        </form>
+
+        <p><a href="/bank/transactions">View transactions</a></p>
+        <p><a href="/labs">Back to Labs</a></p>
+      </div>
+    </div>
+    <script src="/public/bank.js"></script>
+  </body>
+</html>

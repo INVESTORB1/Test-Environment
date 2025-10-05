@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Invite Created</title>
+  </head>
+  <body>
+    <h1>Invite Created for <%= email %></h1>
+    <% if (sent) { %>
+      <p>Magic link sent to the user's email.</p>
+    <% } else { %>
+      <p>Magic link (fallback): <a href="<%= link %>"><%= link %></a></p>
+    <% } %>
+    <p><a href="/admin">Back to Admin</a></p>
+  </body>
+</html>

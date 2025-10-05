@@ -23,3 +23,14 @@ Email (magic links):
 	- `SMTP_FROM` - optional from address
 
 If SMTP is not configured the prototype falls back to showing the magic link on-screen.
+
+Seed templates (optional):
+If you want the demo bank templates pre-populated, run the seed script after creating the `data` directory:
+
+```powershell
+mkdir data
+node scripts/seed-templates.js
+npm start
+```
+
+The seed script inserts a few sample bank templates (Alice, Bob, Carol). After that, visiting `/bank` will copy templates into your session sandbox automatically.

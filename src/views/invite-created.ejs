@@ -3,14 +3,39 @@
   <head>
     <meta charset="utf-8" />
     <title>Invite Created</title>
+    <link rel="stylesheet" href="/public/styles.css">
   </head>
   <body>
     <h1>Invite Created for <%= email %></h1>
     <% if (sent) { %>
       <p>Magic link sent to the user's email.</p>
     <% } else { %>
-      <p>Magic link (fallback): <a href="<%= link %>"><%= link %></a></p>
+      <p>Magic link (fallback):
+        <span class="muted" id="magicLinkText"><a href="<%= link %>"><%= link %></a></span>
+        <button id="copyInviteBtn" class="btn btn-outline" style="margin-left:8px">Copy</button>
+      </p>
     <% } %>
     <p><a href="/admin">Back to Admin</a></p>
+    <div id="toast" class="toast" aria-hidden="true"></div>
+    <script>
+      (function () {
+        const btn = document.getElementById('copyInviteBtn');
+        if (!btn) return;
+        btn.addEventListener('click', async function () {
+          const linkEl = document.querySelector('#magicLinkText a');
+          if (!linkEl) return;
+          try {
+            await navigator.clipboard.writeText(linkEl.href);
+            const toast = document.getElementById('toast');
+            toast.textContent = 'Magic link copied to clipboard';
+            toast.className = 'toast toast-visible';
+            toast.setAttribute('aria-hidden', 'false');
+            setTimeout(() => { toast.classList.remove('toast-visible'); toast.setAttribute('aria-hidden', 'true'); }, 3000);
+          } catch (err) {
+            alert('Copy failed — please select and copy the link manually');
+          }
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -6,10 +6,39 @@
   </head>
   <body>
     <h1>Admin - Create Invite</h1>
+    <% if (adminFlash) { %>
+      <div class="toast <%= adminFlash.type %>"><%= adminFlash.msg %></div>
+    <% } %>
     <form method="post" action="/admin/invite">
       <label>Email: <input name="email" type="email" required></label>
       <button type="submit">Create Invite</button>
     </form>
+
+    <h2>Testers</h2>
+    <form method="post" action="/admin/testers">
+      <label>Username: <input name="username" required></label>
+      <label>Email (optional): <input name="email" type="email"></label>
+      <button type="submit">Create Tester</button>
+    </form>
+    <table>
+      <thead><tr><th>Username</th><th>Email</th><th>Last used</th><th>Action</th></tr></thead>
+      <tbody>
+      <% testers.forEach(t => { %>
+        <tr>
+          <td><strong><%= t.username %></strong></td>
+          <td><%= t.email || 'no-email' %></td>
+          <td><%= t.last_used ? formatWhen(t.last_used) : '-' %></td>
+          <td>
+            <form method="post" action="/admin/testers/delete" style="display:inline">
+              <input type="hidden" name="id" value="<%= t.id %>" />
+              <button type="submit">Revoke</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+
     <h2>Existing Invites</h2>
     <ul>
       <% invites.forEach(i => { %>

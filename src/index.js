@@ -29,6 +29,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// simple admin flash mechanism
+app.use((req, res, next) => {
+  res.locals.adminFlash = req.session.adminFlash || null;
+  delete req.session.adminFlash;
+  next();
+});
+
 // helper: currency formatter (cents to formatted Naira)
 function formatCurrency(cents) {
   if (cents == null) return '₦0.00';
@@ -79,7 +86,57 @@ app.get('/admin/logout', (req, res) => {
 
 app.get('/admin', requireAdmin, async (req, res) => {
   const invites = await db.allInvites();
-  res.render('admin', { invites });
+  const testers = await db.listTesters();
+  res.render('admin', { invites, testers });
+});
+
+// Admin: create tester user (username + optional email)
+app.post('/admin/testers', requireAdmin, async (req, res) => {
+  const username = req.body.username;
+  const email = req.body.email || null;
+  try {
+    await db.createTester(username, email);
+    req.session.adminFlash = { type: 'success', msg: `Tester '${username}' created` };
+  } catch (err) {
+    if (err && err.code === 'DUPLICATE_TESTER') {
+      req.session.adminFlash = { type: 'error', msg: `Tester '${username}' already exists` };
+    } else {
+      req.session.adminFlash = { type: 'error', msg: `Error creating tester` };
+    }
+  }
+  res.redirect('/admin');
+});
+
+// Admin: revoke/delete tester
+app.post('/admin/testers/delete', requireAdmin, async (req, res) => {
+  const id = req.body.id;
+  if (!id) {
+    req.session.adminFlash = { type: 'error', msg: 'Missing tester id' };
+    return res.redirect('/admin');
+  }
+  await db.deleteTester(id);
+  req.session.adminFlash = { type: 'success', msg: 'Tester removed' };
+  res.redirect('/admin');
+});
+
+// Tester login page (public): testers enter username and the server will create an invite
+app.get('/tester-login', (req, res) => {
+  res.render('tester-login', { error: null });
+});
+
+app.post('/tester-login', async (req, res) => {
+  const username = req.body.username;
+  if (!username) return res.render('tester-login', { error: 'Username required' });
+  const tester = await db.findTesterByUsername(username);
+  if (!tester) return res.render('tester-login', { error: 'Unknown tester username' });
+  // create invite for tester email if available, else create with username@example.com fallback
+  const email = tester.email || `${tester.username}@example.com`;
+  const token = uuidv4();
+  await db.createInvite(token, email);
+  const base = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+  const link = `${base.replace(/\/$/, '')}/auth/magic/${token}`;
+  // show invite-created view with the generated link
+  res.render('invite-created', { email, link, sent: false });
 });
 
 // Admin bank templates
@@ -122,6 +179,12 @@ app.get('/auth/magic/:token', async (req, res) => {
   req.session.user = { id: user.id, email: user.email, role: 'tester' };
   // mark invite used
   await db.useInvite(token);
+  // if this invite was for a pre-created tester, record last_used
+  try {
+    await db.updateTesterLastUsedByEmail(invite.email, new Date().toISOString());
+  } catch (e) {
+    // ignore if not a tester or other errors
+  }
   res.redirect('/labs');
 });
 

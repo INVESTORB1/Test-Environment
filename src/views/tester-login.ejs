@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Tester login</title>
+  <link rel="stylesheet" href="/public/styles.css">
+  </head>
+  <body>
+    <main class="container">
+      <h1>Tester access</h1>
+      <% if (error) { %>
+        <div class="toast error"><%= error %></div>
+      <% } %>
+      <form method="post" action="/tester-login">
+        <label for="username">Username</label>
+        <input id="username" name="username" required />
+        <button class="btn">Get invite</button>
+      </form>
+      <p>If you were given a username by an admin, enter it here and the system will generate a magic link for you.</p>
+    </main>
+  </body>
+  <script>
+    // small helper to focus input
+    document.getElementById('username')?.focus();
+  </script>
+</html>

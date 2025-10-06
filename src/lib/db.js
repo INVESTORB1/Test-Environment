@@ -2,7 +2,16 @@ const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'app.db');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DATA_DIR, 'app.db');
+
+// ensure data directory exists when using a mounted path
+const fs = require('fs');
+try {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch (e) {
+  // non-fatal; open() will fail later if path is invalid
+}
 
 let dbPromise = null;
 
@@ -35,6 +44,13 @@ async function getDb() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_name TEXT,
         balance_cents INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS testers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        email TEXT,
+        last_used DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -113,4 +129,41 @@ module.exports = {
   getAttemptsByUser,
   createBankTemplate,
   listBankTemplates,
+  // tester helpers
+  createTester: async (username, email) => {
+    const db = await getDb();
+    try {
+      const res = await db.run('INSERT INTO testers(username,email) VALUES(?,?)', username, email);
+      return db.get('SELECT * FROM testers WHERE id = ?', res.lastID);
+    } catch (err) {
+      // sqlite duplicate error code
+      if (err && err.code === 'SQLITE_CONSTRAINT') {
+        const e = new Error('duplicate');
+        e.code = 'DUPLICATE_TESTER';
+        throw e;
+      }
+      throw err;
+    }
+  },
+  listTesters: async () => {
+    const db = await getDb();
+    return db.all('SELECT * FROM testers ORDER BY id');
+  },
+  findTesterByUsername: async (username) => {
+    const db = await getDb();
+    return db.get('SELECT * FROM testers WHERE username = ?', username);
+  },
+  deleteTester: async (id) => {
+    const db = await getDb();
+    return db.run('DELETE FROM testers WHERE id = ?', id);
+  },
+  updateTesterLastUsed: async (username, when) => {
+    const db = await getDb();
+    return db.run('UPDATE testers SET last_used = ? WHERE username = ?', when, username);
+  }
+  ,
+  updateTesterLastUsedByEmail: async (email, when) => {
+    const db = await getDb();
+    return db.run('UPDATE testers SET last_used = ? WHERE email = ? OR username = ?', when, email, email);
+  }
 };

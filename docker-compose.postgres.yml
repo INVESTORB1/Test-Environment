@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: example
+      POSTGRES_DB: testenv
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+
+  app:
+    build: .
+    command: npm start
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:example@postgres:5432/testenv
+      - REDIS_URL=redis://redis:6379
+      - SESSION_SECRET=change-me-in-prod
+      - DATA_DIR=/data
+    volumes:
+      - ./:/usr/src/app
+      - app-data:/data
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  pgdata:
+  redis-data:
+  app-data:

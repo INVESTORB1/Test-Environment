@@ -180,6 +180,7 @@ app.post('/admin/testers', requireAdmin, async (req, res) => {
   const email = req.body.email || null;
   try {
     await db.createTester(username, email);
+    await db.logAudit(req.session.user ? req.session.user.email : 'admin', 'create_tester', `username=${username} email=${email}`);
     req.session.adminFlash = { type: 'success', msg: `Tester '${username}' created` };
   } catch (err) {
     if (err && err.code === 'DUPLICATE_TESTER') {
@@ -199,6 +200,7 @@ app.post('/admin/testers/delete', requireAdmin, async (req, res) => {
     return res.redirect('/admin');
   }
   await db.deleteTester(id);
+  await db.logAudit(req.session.user ? req.session.user.email : 'admin', 'delete_tester', `id=${id}`);
   req.session.adminFlash = { type: 'success', msg: 'Tester removed' };
   res.redirect('/admin');
 });
@@ -253,6 +255,7 @@ app.post('/admin/invite', requireAdmin, async (req, res) => {
   const emailAddr = req.body.email;
   const token = uuidv4();
   await db.createInvite(token, emailAddr);
+  await db.logAudit(req.session.user ? req.session.user.email : 'admin', 'create_invite', `email=${emailAddr}`);
   const link = `${req.protocol}://${req.get('host')}/auth/magic/${token}`;
   const sent = await email.sendMagicLink(emailAddr, link).catch(() => false);
   if (sent) {
@@ -272,8 +275,15 @@ app.get('/auth/magic/:token', async (req, res) => {
   if (!user) {
     user = await db.createUser(invite.email);
   }
-  // set session
-  req.session.user = { id: user.id, email: user.email, role: 'tester' };
+  // regenerate session to avoid carrying over previous session data (sandbox files)
+  const oldSessionId = req.sessionID;
+  await new Promise((resolve, reject) => {
+    req.session.regenerate(async (err) => {
+      if (err) return reject(err);
+      req.session.user = { id: user.id, email: user.email, role: 'tester' };
+      resolve();
+    });
+  });
   // if a tester entry exists with a username for this email, surface it in session
   try {
     const tester = await db.findTesterByEmail(invite.email);
@@ -283,12 +293,17 @@ app.get('/auth/magic/:token', async (req, res) => {
   }
   // mark invite used
   await db.useInvite(token);
+  await db.logAudit(user.email, 'login_magic', `invite=${token}`);
   // if this invite was for a pre-created tester, record last_used
   try {
     await db.updateTesterLastUsedByEmail(invite.email, new Date().toISOString());
   } catch (e) {
     // ignore if not a tester or other errors
   }
+  // remove the old session DB file (if any) to prevent old user's sandbox from leaking
+  try {
+    if (oldSessionId && oldSessionId !== req.sessionID) await sessionDb.deleteSessionDb(oldSessionId);
+  } catch (e) {}
   res.redirect('/labs');
 });
 
@@ -332,6 +347,8 @@ app.post('/bank/accounts', requireAuth, async (req, res) => {
   const owner = req.body.owner;
   const balance = Math.round(parseFloat(req.body.balance || '0') * 100);
   await bank.createAccount(req.sessionID, owner, balance);
+  // log audit at app-level
+  try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'create_account', `owner=${owner} balance=${balance}`); } catch (e) {}
   res.redirect('/bank');
 });
 
@@ -367,12 +384,66 @@ app.post('/bank/transfer', requireAuth, async (req, res) => {
 
 app.post('/bank/reset', requireAuth, async (req, res) => {
   await sessionDb.deleteSessionDb(req.sessionID);
+  try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'reset_sandbox', `session=${req.sessionID}`); } catch (e) {}
   res.redirect('/bank');
+});
+
+// Admin audit CSV download
+app.get('/admin/audit.csv', requireAdmin, async (req, res) => {
+  const rows = await db.listAudits();
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="audit-${Date.now()}.csv"`);
+  res.write('id,actor,action,details,created_at\n');
+  for (const r of rows) {
+    const line = [r.id, r.actor || '', r.action || '', (r.details || '').replace(/\r?\n/g, ' '), r.created_at].map(v => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }).join(',');
+    res.write(line + '\n');
+  }
+  res.end();
 });
 
 app.get('/bank/transactions', requireAuth, async (req, res) => {
   const tx = await bank.listTransactions(req.sessionID);
   res.render('bank-transactions', { tx });
+});
+
+// CSV download for transactions
+app.get('/bank/transactions.csv', requireAuth, async (req, res) => {
+  const tx = await bank.listTransactions(req.sessionID);
+  // CSV header
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="transactions-${Date.now()}.csv"`);
+  const header = ['id','from_account','from_owner','to_account','to_owner','amount_cents','status','note','created_at'];
+  const rows = tx.map(t => [
+    t.id,
+    t.from_account,
+    t.from_owner_name || '',
+    t.to_account,
+    t.to_owner_name || '',
+    t.amount_cents,
+    t.status,
+    (t.note || '').replace(/\r?\n/g, ' '),
+    t.created_at
+  ]);
+  // write CSV
+  res.write(header.join(',') + '\n');
+  for (const r of rows) {
+    // simple CSV escape: wrap fields that contain comma or quotes
+    const line = r.map(v => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }).join(',');
+    res.write(line + '\n');
+  }
+  res.end();
 });
 
 app.get('/attempts', requireAuth, async (req, res) => {

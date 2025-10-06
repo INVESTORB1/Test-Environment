@@ -45,6 +45,9 @@ if (process.env.DATABASE_URL) {
       return res.rows ? res.rows[0] : null;
     },
     listBankTemplates: async () => all('SELECT * FROM bank_templates ORDER BY id'),
+  // audits
+  logAudit: async (actor, action, details) => run('INSERT INTO audits(actor,action,details) VALUES($1,$2,$3)', actor, action, details || null),
+  listAudits: async () => all('SELECT * FROM audits ORDER BY created_at DESC') ,
     // testers
     createTester: async (username, email) => {
       try {
@@ -119,6 +122,13 @@ if (process.env.DATABASE_URL) {
           last_used DATETIME,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+          CREATE TABLE IF NOT EXISTS audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor TEXT,
+            action TEXT,
+            details TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
       `);
     }
     return dbPromise;
@@ -195,6 +205,15 @@ if (process.env.DATABASE_URL) {
     getAttemptsByUser,
     createBankTemplate,
     listBankTemplates,
+    // audits
+    logAudit: async (actor, action, details) => {
+      const db = await getDb();
+      return db.run('INSERT INTO audits(actor,action,details) VALUES(?,?,?)', actor, action, details || null);
+    },
+    listAudits: async () => {
+      const db = await getDb();
+      return db.all('SELECT * FROM audits ORDER BY created_at DESC');
+    },
     // tester helpers
     createTester: async (username, email) => {
       const db = await getDb();

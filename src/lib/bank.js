@@ -7,8 +7,22 @@ async function listAccounts(sessionId) {
 
 async function createAccount(sessionId, ownerName, initialCents) {
   const db = await sessionDb.getSessionDb(sessionId);
-  const res = await db.run('INSERT INTO accounts(owner_name,balance_cents) VALUES(?,?)', ownerName, initialCents);
-  return db.get('SELECT * FROM accounts WHERE id = ?', res.lastID);
+  // generate a short unique account number (8 digits) and ensure uniqueness
+  function genAcc() {
+    return Math.floor(10000000 + Math.random() * 90000000).toString();
+  }
+  let accNum = genAcc();
+  // try a few times to avoid collision
+  for (let i = 0; i < 5; i++) {
+    try {
+      const res = await db.run('INSERT INTO accounts(owner_name,account_number,balance_cents) VALUES(?,?,?)', ownerName, accNum, initialCents);
+      return db.get('SELECT * FROM accounts WHERE id = ?', res.lastID);
+    } catch (e) {
+      // unique constraint failed, try again
+      accNum = genAcc();
+      if (i === 4) throw e;
+    }
+  }
 }
 
 async function listTransactions(sessionId) {
@@ -16,7 +30,9 @@ async function listTransactions(sessionId) {
   // return transactions enriched with owner names for display
   const q = `SELECT t.*, 
     fa.owner_name AS from_owner_name,
-    ta.owner_name AS to_owner_name
+    ta.owner_name AS to_owner_name,
+    fa.account_number AS from_account_number,
+    ta.account_number AS to_account_number
     FROM transactions t
     LEFT JOIN accounts fa ON t.from_account = fa.id
     LEFT JOIN accounts ta ON t.to_account = ta.id
@@ -36,13 +52,15 @@ async function transfer(sessionId, fromId, toId, amountCents, note) {
       if (from.balance_cents < amountCents) throw new Error('Insufficient funds');
       await db.run('UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ?', amountCents, fromId);
       await db.run('UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ?', amountCents, toId);
-      const res = await db.run('INSERT INTO transactions(from_account,to_account,amount_cents,status,note) VALUES(?,?,?,?,?)', fromId, toId, amountCents, 'success', note || null);
+      // record account numbers at time of transaction for auditability
+      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from.account_number, to.account_number, amountCents, 'success', note || null);
+      const res = await db.get('SELECT * FROM transactions WHERE id = last_insert_rowid()');
       await db.exec('COMMIT');
-      return db.get('SELECT * FROM transactions WHERE id = ?', res.lastID);
+      return res;
     } catch (err) {
       await db.exec('ROLLBACK').catch(() => {});
-      const res = await db.run('INSERT INTO transactions(from_account,to_account,amount_cents,status,note) VALUES(?,?,?,?,?)', fromId, toId, amountCents, 'failed', String(err));
-      return db.get('SELECT * FROM transactions WHERE id = ?', res.lastID);
+      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from ? from.account_number : null, to ? to.account_number : null, amountCents, 'failed', String(err));
+      return db.get('SELECT * FROM transactions WHERE id = last_insert_rowid()');
     }
   });
 }

@@ -10,6 +10,9 @@
       <h1>Transactions</h1>
     </header>
     <div class="card">
+       <div style="margin-bottom:12px; text-align:right;">
+         <a class="btn btn-primary" href="/bank/transactions.csv">Download CSV</a>
+       </div>
     <div class="table-responsive">
       <table class="tx-table">
         <thead>
@@ -29,11 +32,11 @@
               <td class="muted"><%= t.id %></td>
               <td>
                 <div><strong><%= t.from_owner_name || '—' %></strong></div>
-                <div class="muted small">Acct #<%= t.from_account %></div>
+                <div class="muted small">Acct #<%= t.from_account_number || t.from_account %></div>
               </td>
               <td>
                 <div><strong><%= t.to_owner_name || '—' %></strong></div>
-                <div class="muted small">Acct #<%= t.to_account %></div>
+                <div class="muted small">Acct #<%= t.to_account_number || t.to_account %></div>
               </td>
               <td class="right"><%= formatCurrency(t.amount_cents) %></td>
               <td>

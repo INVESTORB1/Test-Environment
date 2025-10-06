@@ -29,6 +29,7 @@
               <tr>
                 <th>ID</th>
                 <th>Owner</th>
+                <th>Account #</th>
                 <th class="right">Balance</th>
               </tr>
             </thead>
@@ -37,6 +38,7 @@
               <tr>
                 <td><strong><%= a.id %></strong></td>
                 <td><%= a.owner_name %></td>
+                <td class="mono"> <%= a.account_number || ('#' + a.id) %> </td>
                 <td class="right"><%= formatCurrency(a.balance_cents) %></td>
               </tr>
             <% }) %>

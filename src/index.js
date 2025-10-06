@@ -9,6 +9,10 @@ const bank = require('./lib/bank');
 const sessionDb = require('./lib/sessionDb');
 
 const app = express();
+// When deployed behind a proxy (Render, Heroku, etc.) trust the proxy so
+// req.protocol and req.get('host') reflect the external request. This
+// ensures generated absolute URLs (magic links) use https and the correct host.
+app.set('trust proxy', true);
 // serve static assets (CSS)
 app.use('/public', express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;

@@ -11,6 +11,13 @@ function getTransport() {
   });
 }
 
+function buildMagicLink(req, token) {
+  // Allow overriding base URL via env var (useful on some PaaS where proxy info
+  // might not be available). If not set, build from request.
+  const base = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+  return `${base}/auth/magic/${token}`;
+}
+
 async function sendMagicLink(email, link) {
   const transport = getTransport();
   if (!transport) return false;
@@ -24,4 +31,4 @@ async function sendMagicLink(email, link) {
   return true;
 }
 
-module.exports = { sendMagicLink };
+module.exports = { sendMagicLink, buildMagicLink };

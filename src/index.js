@@ -29,6 +29,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// friendly display name middleware: prefer username, else the email local-part
+app.use((req, res, next) => {
+  const user = req.session.user || null;
+  if (!user) {
+    res.locals.userDisplayName = null;
+    return next();
+  }
+  if (user.username && user.username.trim()) {
+    res.locals.userDisplayName = user.username;
+    return next();
+  }
+  if (user.email && typeof user.email === 'string') {
+    const local = user.email.split('@')[0];
+    res.locals.userDisplayName = local;
+    return next();
+  }
+  res.locals.userDisplayName = user.email || null;
+  next();
+});
+
 // simple admin flash mechanism
 app.use((req, res, next) => {
   res.locals.adminFlash = req.session.adminFlash || null;
@@ -213,6 +233,13 @@ app.get('/auth/magic/:token', async (req, res) => {
   }
   // set session
   req.session.user = { id: user.id, email: user.email, role: 'tester' };
+  // if a tester entry exists with a username for this email, surface it in session
+  try {
+    const tester = await db.findTesterByEmail(invite.email);
+    if (tester && tester.username) req.session.user.username = tester.username;
+  } catch (e) {
+    // ignore lookup errors
+  }
   // mark invite used
   await db.useInvite(token);
   // if this invite was for a pre-created tester, record last_used

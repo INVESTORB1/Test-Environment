@@ -71,7 +71,7 @@ app.get('/admin/login', (req, res) => {
 
 app.post('/admin/login', (req, res) => {
   const pw = req.body.password;
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Olamide';
   if (pw === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
     return res.redirect('/admin');
@@ -126,9 +126,22 @@ app.get('/tester-login', (req, res) => {
 
 app.post('/tester-login', async (req, res) => {
   const username = req.body.username;
-  if (!username) return res.render('tester-login', { error: 'Username required' });
+  // missing username -> 400
+  if (!username) {
+    if (req.accepts('json') && !req.accepts('html')) {
+      return res.status(400).json({ error: 'Username required' });
+    }
+    return res.status(400).render('tester-login', { error: 'Username required' });
+  }
+
   const tester = await db.findTesterByUsername(username);
-  if (!tester) return res.render('tester-login', { error: 'Unknown tester username' });
+  // unknown username -> 404
+  if (!tester) {
+    if (req.accepts('json') && !req.accepts('html')) {
+      return res.status(404).json({ error: 'Unknown tester username' });
+    }
+    return res.status(404).render('tester-login', { error: 'Unknown tester username' });
+  }
   // create invite for tester email if available, else create with username@example.com fallback
   const email = tester.email || `${tester.username}@example.com`;
   const token = uuidv4();

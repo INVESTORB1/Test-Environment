@@ -39,13 +39,21 @@ if (process.env.REDIS_URL) {
   }
 }
 if (!sessionStore) {
-  // fallback to SQLite-backed store using connect-sqlite3
-  const SQLiteStore = require('connect-sqlite3')(session);
-  // ensure sessions directory exists (app writes here)
-  const sessionsDir = path.join(__dirname, 'data', 'sessions');
-  try { require('fs').mkdirSync(sessionsDir, { recursive: true }); } catch (e) { /* ignore */ }
-  sessionStore = new SQLiteStore({ dir: sessionsDir, db: 'sessions.sqlite' });
-  console.log('Using SQLite session store at', sessionsDir);
+  // fallback to SQLite-backed store using connect-sqlite3 if available
+  try {
+    const SQLiteStore = require('connect-sqlite3')(session);
+    // ensure sessions directory exists (app writes here)
+    const sessionsDir = path.join(__dirname, 'data', 'sessions');
+    try { require('fs').mkdirSync(sessionsDir, { recursive: true }); } catch (e) { /* ignore */ }
+    sessionStore = new SQLiteStore({ dir: sessionsDir, db: 'sessions.sqlite' });
+    console.log('Using SQLite session store at', sessionsDir);
+  } catch (err) {
+    // If the module isn't installed or fails to load we must not crash the app.
+    console.warn('connect-sqlite3 not available; falling back to in-memory session store.');
+    console.warn('To enable persistent sessions, run: npm install connect-sqlite3 connect-redis ioredis');
+    // leave sessionStore null so we'll use default MemoryStore below
+    sessionStore = null;
+  }
 }
 
 app.use(session({

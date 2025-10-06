@@ -3,14 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <title><%= lab.title %></title>
+    <link rel="stylesheet" href="/public/styles.css">
   </head>
-  <body>
-    <h1><%= lab.title %></h1>
-    <p><%= lab.instructions %></p>
-    <form method="post" action="/labs/<%= lab.id %>/run">
-      <label>Answer: <input name="answer" /></label>
-      <button type="submit">Run</button>
-    </form>
-    <p><a href="/labs">Back</a></p>
+  <body class="lab-detail-page">
+    <main class="card">
+      <header>
+        <h1><%= lab.title %></h1>
+        <p class="muted"><%= lab.description %></p>
+      </header>
+
+      <section>
+        <h2>Problem statement</h2>
+        <p class="project-problem"><%= lab.problem %></p>
+      </section>
+
+      <section>
+        <h3>Step-by-step</h3>
+        <ol>
+          <% lab.steps.forEach(s => { %>
+            <li><%= s %></li>
+          <% }) %>
+        </ol>
+      </section>
+
+      <section>
+        <h3>Hints</h3>
+        <ul>
+          <% lab.hints.forEach(h => { %>
+            <li><%= h %></li>
+          <% }) %>
+        </ul>
+      </section>
+
+      <section class="project-actions">
+        <a class="btn btn-primary" href="/bank">Open Bank Sandbox</a>
+        <a class="btn" href="/labs">Back to Labs</a>
+      </section>
+    </main>
   </body>
 </html>
+

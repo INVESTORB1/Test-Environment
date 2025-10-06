@@ -1,7 +1,41 @@
 
+:root {
+	--bg: #0b2340; /* dark blue background for labs page */
+	--card-bg: #ffffff;
+	--muted: #b7c7d6;
+	--text: #e8f3ff; /* light text for contrast on dark bg */
+	--btn-bg: #2b8aed;
+}
+
 body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; margin: 24px; background: #f5f7fb; color: #213547 }
 header { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px }
 .card { background: white; padding: 18px; border-radius:10px; box-shadow: 0 6px 18px rgba(33,53,71,0.06); margin-bottom:14px }
+.intro p { margin: 8px 0 12px }
+.project-grid { display:flex; gap:18px; align-items:flex-start }
+.projects { flex:1 }
+.sidebar { width: 260px }
+.project-card { margin-bottom: 16px }
+.project-header h3 { margin:0 }
+.project-body { margin-top:10px }
+.project-problem { color:#475b6b; background:#fbfdff; padding:12px; border-radius:8px; border:1px solid #eef5fb }
+.project-actions { margin-top:12px; display:flex; gap:8px }
+.project-bullets { margin:10px 0 0; padding-left:18px }
+
+/* Responsive adjustments */
+@media (max-width: 800px) {
+	.project-grid { flex-direction: column }
+	.sidebar { width: 100% }
+	.project-actions { flex-direction: column; align-items: stretch }
+	.btn { width:100%; text-align:center }
+}
+
+/* checklist */
+#checklist { list-style:none; padding-left:0 }
+#checklist li { margin:8px 0 }
+
+/* modal */
+.modal { position:fixed; left:0; right:0; top:0; bottom:0; display:none; align-items:center; justify-content:center; background: rgba(17,24,39,0.4); z-index:1400 }
+.modal-content { max-width:560px; width:94%; padding:18px }
 .grid { display:grid; grid-template-columns: 1fr 360px; gap:18px }
 label { display:block; margin-bottom:8px; font-weight:500 }
 input[type=text], input[type=number], input[type=password], select { width:100%; padding:10px; border:1px solid #e1e8f0; border-radius:8px; background:#fbfdff }
@@ -11,10 +45,117 @@ input[type=text], input[type=number], input[type=password], select { width:100%;
 .btn-outline { background: transparent; color:#2b8aed; border:1px solid #d7eafc }
 table { width:100%; border-collapse:collapse }
 th, td { padding:10px; border-bottom:1px solid #eef3f8 }
+
+/* Labs table specific tweaks */
+.labs-table thead th { text-align:left; font-weight:700; padding:14px 10px }
+.labs-table tbody td { vertical-align:middle }
+.labs-table td:first-child { width:6%; }
+.labs-table td:nth-child(2) { width:28%; }
+.labs-table td:nth-child(3) { width:56%; }
+.labs-actions { width:10%; text-align:right }
+.labs-actions .btn { padding:8px 14px; border-radius:10px; font-weight:700 }
+.labs-actions .btn:hover { filter:brightness(0.95); transform:translateY(-1px) }
+
+/* Ensure the table looks good on small screens */
+@media (max-width: 700px) {
+	.labs-table, .labs-table thead, .labs-table tbody, .labs-table th, .labs-table td, .labs-table tr { display:block }
+	.labs-table thead { display:none }
+	.labs-table tr { margin-bottom:12px; border:1px solid #eef3f8; border-radius:8px; padding:10px; background:#fff }
+	.labs-table td { display:flex; justify-content:space-between; padding:10px; border-bottom:0 }
+	.labs-table td:nth-child(2) { margin-top:6px }
+	.labs-actions { text-align:right; margin-top:6px }
+	.labs-actions .btn { width:120px }
+}
+
+/* Number badge styling for professional look */
+.lab-number { text-align:center; font-weight:700 }
+.badge-number { display:inline-block; background:#e9f2ff; color:#0b2340; padding:8px 10px; border-radius:8px; font-weight:800 }
+.lab-title { color:#123047; font-size:1.02rem }
+
+/* Slightly larger, cleaner table header styling */
+.labs-page .card { padding:22px }
+.labs-table thead th { letter-spacing:0.2px; font-size:1rem }
+.labs-table tbody td { padding:18px 12px }
+
+/* Refined button appearance */
+.btn-primary { background: linear-gradient(180deg,#2b8aed,#1f6ed6); box-shadow: 0 6px 18px rgba(43,138,237,0.18); border-radius:10px }
+.btn-primary:active { transform:translateY(0) }
 .banner { padding:10px 14px; border-radius:8px; margin-bottom:12px }
 .banner-success { background: #e6f4ea; color:#1b6f3a; border:1px solid #c8edd3 }
 .banner-error { background: #fff0f0; color:#a32b2b; border:1px solid #f3c6c6 }
 .muted { color:#6b7a86; font-size:0.95rem }
+
+/* Make short descriptions in labs table more visible */
+.labs-table td.muted { color:#56707f; font-size:1rem }
+.labs-page .labs-table td.muted { color:#7b93a3; opacity:0.95 }
+
+/* Labs page dark background tweaks */
+.labs-page { background: var(--bg); color: var(--text) }
+.labs-page header h1, .labs-page header .muted { color: var(--text) }
+.labs-page .card { background: var(--card-bg); color: #213547; box-shadow: 0 8px 24px rgba(2,8,23,0.45) }
+.labs-page .intro .muted { color: #556b7b }
+.labs-page .muted { color: var(--muted) }
+.labs-page a { color: var(--btn-bg) }
+.labs-page .btn { background: var(--btn-bg); color: white }
+.labs-page .labs-table thead { background: #fbfdff }
+.labs-page table { background: transparent }
+
+/* Bank sandbox uses the same dark theme as labs */
+.bank-page { background: var(--bg); color: var(--text) }
+.bank-page header h1 { color: var(--text) }
+.bank-page .card { background: var(--card-bg); color: #213547; box-shadow: 0 8px 24px rgba(2,8,23,0.45) }
+.bank-page .muted { color: var(--muted) }
+.bank-page a { color: var(--btn-bg) }
+.bank-page .btn { background: var(--btn-bg); color: white }
+.bank-page .accounts-table thead { background:#fbfdff }
+
+/* Lab detail page dark theme */
+.lab-detail-page { background: var(--bg); color: var(--text) }
+.lab-detail-page header h1, .lab-detail-page header .muted { color: var(--text) }
+.lab-detail-page .card { background: var(--card-bg); color: #213547; box-shadow: 0 8px 24px rgba(2,8,23,0.45) }
+.lab-detail-page .muted { color: var(--muted) }
+.lab-detail-page a { color: var(--btn-bg) }
+.lab-detail-page .btn { background: var(--btn-bg); color: white }
+.lab-detail-page .project-problem { background:#fbfdff }
+
+/* Polished lab detail layout */
+.lab-detail-page body, .lab-detail-page html { height:100% }
+.lab-detail-page { background: linear-gradient(180deg, #091b2e 0%, #072033 50%, #05192a 100%); padding: 32px 20px }
+.lab-detail-page .card { max-width:1100px; margin: 18px auto; padding: 36px; border-radius:14px }
+.lab-detail-page header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px }
+.lab-detail-page header h1 { margin:0; font-size:2.25rem; letter-spacing:-0.6px; color:#0e2a44 }
+.lab-detail-page header .muted { font-size:0.95rem; color:#7f98a8 }
+
+/* Problem callout */
+.lab-detail-page .project-problem { background: #f7fbff; border:1px solid #e6f0f8; padding:18px 20px; border-radius:10px; color:#123047; box-shadow: inset 0 1px 0 #ffffff }
+
+/* Sections */
+.lab-detail-page h2, .lab-detail-page h3 { color:#123047 }
+.lab-detail-page h2 { font-size:1.5rem; margin-top:28px }
+.lab-detail-page h3 { font-size:1.15rem; margin-top:20px }
+.lab-detail-page ol, .lab-detail-page ul { margin-left:20px; color:#2b4656 }
+.lab-detail-page ol li { margin:10px 0; line-height:1.6 }
+.lab-detail-page ul li { margin:8px 0; line-height:1.5 }
+
+/* Actions */
+.lab-detail-page .project-actions { display:flex; gap:14px; align-items:center; margin-top:22px }
+.lab-detail-page .project-actions .btn { padding:12px 18px; border-radius:10px; font-weight:700 }
+.lab-detail-page .btn.btn-outline { background:transparent; color:var(--btn-bg); border:1px solid rgba(43,138,237,0.18) }
+.lab-detail-page .btn.btn-primary { background: linear-gradient(180deg,#2b8aed,#1f6ed6); box-shadow:0 8px 20px rgba(27,111,218,0.18) }
+
+/* Make content a little airier on wide screens */
+@media (min-width: 1000px) {
+	.lab-detail-page .card { padding:48px 56px }
+}
+
+/* Mobile adjustments */
+@media (max-width: 700px) {
+	.lab-detail-page header { flex-direction:column; align-items:flex-start }
+	.lab-detail-page header h1 { font-size:1.5rem }
+	.lab-detail-page .card { padding:18px; margin:12px }
+	.lab-detail-page .project-actions { flex-direction:column; align-items:stretch }
+	.lab-detail-page .project-actions .btn { width:100% }
+}
 
 .table-responsive { overflow:auto }
 .accounts-table th, .accounts-table td { text-align:left }

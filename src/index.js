@@ -54,6 +54,29 @@ function formatWhen(whenStr) {
 }
 app.use((req, res, next) => { res.locals.formatWhen = formatWhen; next(); });
 
+// Small in-memory lab catalog (extendable)
+const LAB_CATALOG = [
+  {
+    id: 1,
+    title: 'Bank Sandbox',
+    description: 'A beginner-friendly bank transaction lab',
+    problem: 'Perform valid transfers between accounts, avoid overdrafts, and verify transactions are recorded correctly in the transaction log. The lab is sandboxed per session so changes are isolated.',
+    steps: [
+      'Open the Bank Sandbox and inspect seeded accounts and balances.',
+      'Create a new account if you want an additional owner.',
+      'Transfer funds from one account to another (From != To). Watch for overdraft prevention.',
+      'Open Transaction History to verify the transfer details and timestamps.',
+      'Use Reset if you want to return to the seeded state.'
+    ],
+    hints: [
+      'Amounts are entered as currency; use the transfer form to specify amount.',
+      'The UI blocks transfers from an account to itself; choose distinct accounts.',
+      'If a magic link was emailed, check spam; otherwise use the on-screen link.',
+      'Draft your test cases before commencing.'
+    ]
+  }
+];
+
 app.get('/', (req, res) => {
   res.render('index');
 });
@@ -207,8 +230,18 @@ function requireAuth(req, res, next) {
   next();
 }
 
-app.get('/labs', requireAuth, (req, res) => {
-  res.render('labs', { labs: [{ id: 1, title: 'Sample Lab', description: 'A practice lab for novices.' }] });
+app.get('/labs', requireAuth, async (req, res) => {
+  // get attempts for current user to compute per-lab stats
+  const attempts = await db.getAttemptsByUser(req.session.user.id);
+  const labsWithStats = LAB_CATALOG.map((l) => {
+    const userAttempts = attempts.filter(a => Number(a.lab_id) === Number(l.id));
+    return {
+      ...l,
+      attemptsCount: userAttempts.length,
+      lastVisited: userAttempts.length ? userAttempts[0].created_at : null
+    };
+  });
+  res.render('labs', { labs: labsWithStats, user: req.session.user });
 });
 
 // Bank sandbox routes
@@ -251,7 +284,16 @@ app.post('/bank/transfer', requireAuth, async (req, res) => {
   const note = req.body.note;
   const tx = await bank.transfer(req.sessionID, from, to, amount, note);
   const status = tx.status || 'failed';
-  const msg = tx.note || '';
+  // show a clear, user-friendly message on success/failure rather than the raw tx note
+  let msg = '';
+  if (status === 'success') {
+    msg = 'Transaction completed successfully';
+  } else if (tx.error) {
+    msg = tx.error;
+  } else if (tx.note) {
+    // fallback to note only for additional context when not success
+    msg = tx.note;
+  }
   return res.redirect(`/bank?status=${encodeURIComponent(status)}&msg=${encodeURIComponent(msg)}`);
 });
 
@@ -271,43 +313,16 @@ app.get('/attempts', requireAuth, async (req, res) => {
 });
 
 app.get('/labs/:id', requireAuth, (req, res) => {
-  res.render('lab-detail', { lab: { id: req.params.id, title: 'Sample Lab', instructions: 'Type "hello" in the box and submit.' } });
+  const id = Number(req.params.id);
+  const lab = LAB_CATALOG.find(l => l.id === id);
+  if (!lab) return res.status(404).send('Lab not found');
+  res.render('lab-detail', { lab });
 });
 
-app.post('/labs/:id/run', requireAuth, async (req, res) => {
-  const answer = req.body.answer || '';
-  const TIMEOUT_MS = 2000;
 
-  function runLab(answer) {
-    return new Promise((resolve) => {
-      // simulate async work by delaying a bit
-      const simulatedMs = 100 + Math.floor(Math.random() * 200);
-      setTimeout(() => {
-        const ok = answer.trim().toLowerCase() === 'hello';
-        const output = ok ? 'Success: matched expected output' : 'Failure: expected "hello"';
-        resolve({ ok, output });
-      }, simulatedMs);
-    });
-  }
-
-  const start = Date.now();
-  let result;
-  try {
-    result = await Promise.race([
-      runLab(answer),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), TIMEOUT_MS)),
-    ]);
-  } catch (err) {
-    result = { ok: false, output: 'Execution timed out' };
-  }
-
-  const duration = Date.now() - start;
-  db.createAttempt(req.session.user.id, req.params.id, result.ok, result.output, duration).catch(() => {});
-  res.render('lab-result', { ok: result.ok, output: result.output });
-});
 
 app.get('/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/'));
+  req.session.destroy(() => res.redirect('/tester-login'));
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

@@ -2,20 +2,60 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Labs</title>
+    <title>B.O.B Academy — Labs</title>
     <link rel="stylesheet" href="/public/styles.css">
   </head>
-  <body>
+  <body class="labs-page">
     <header>
-      <h1>Labs</h1>
+      <div style="display:flex;align-items:center;gap:12px">
+        <img src="/public/logo-48.png" alt="B.O.B Academy logo" style="width:84px;height:68px;border-radius:6px;object-fit:cover;" onerror="this.style.display='none'"/>
+        <div>
+          <h1 style="margin:0">B.O.B Academy</h1>
+          <div class="muted" style="font-size:0.95rem">Practical test sandboxes for novice testers</div>
+        </div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+        <% if (user) { %>
+          <span class="muted">Signed in as <strong><%= user.email %></strong></span>
+          <form method="get" action="/logout" style="margin:0">
+            <button class="btn btn-outline" type="submit">Logout</button>
+          </form>
+        <% } else { %>
+          <a class="btn btn-outline" href="/tester-login">Tester login</a>
+        <% } %>
+      </div>
     </header>
-    <div class="card">
-      <ul>
-        <% labs.forEach(l => { %>
-          <li><a href="/labs/<%= l.id %>"><%= l.title %></a> - <%= l.description %></li>
-        <% }) %>
-      </ul>
-      <p><a href="/">Home</a> | <a href="/attempts">My Attempts</a> | <a href="/bank">Bank Sandbox</a></p>
+
+  <div class="intro card">
+      <h2>Welcome to the B.O.B Academy Test Environment</h2>
+      <% if (user) { %>
+        <p class="muted">Welcome, <strong><%= user.email %></strong></p>
+      <% } %>
+      <p class="muted">This environment was created as a safe, invite-only place for novice testers to practice realistic tasks in small, self-contained applications.</p>
+      <p class="muted">Below are the available test environments. Click the Details button to view full instructions and open the sandbox.</p>
+    </div>
+
+    <div class="card table-responsive">
+      <table class="labs-table" role="table" aria-label="Available labs">
+        <thead>
+          <tr>
+            <th scope="col" class="num-col">#</th>
+            <th scope="col">Test</th>
+            <th scope="col">Short description</th>
+            <th scope="col">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% labs.forEach((l, idx) => { %>
+            <tr>
+              <td class="lab-number"><span class="badge-number"><%= idx + 1 %></span></td>
+              <td><strong class="lab-title"><%= l.title %></strong></td>
+              <td class="muted"><%= l.description %></td>
+              <td class="labs-actions"><a class="btn btn-primary" href="/labs/<%= l.id %>" aria-label="View details for <%= l.title %>">View details</a></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
     </div>
   </body>
 </html>

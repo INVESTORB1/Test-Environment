@@ -16,7 +16,7 @@
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
         <% if (user) { %>
-          <span class="muted">Signed in as <strong><%= user.email %></strong></span>
+  <span class="muted">Signed in as <strong><%= (typeof userDisplayName !== 'undefined' && userDisplayName) ? userDisplayName : (user ? (user.username || user.email) : '') %></strong></span>
           <form method="get" action="/logout" style="margin:0">
             <button class="btn btn-outline" type="submit">Logout</button>
           </form>
@@ -29,7 +29,7 @@
   <div class="intro card">
       <h2>Welcome to the B.O.B Academy Test Environment</h2>
       <% if (user) { %>
-        <p class="muted">Welcome, <strong><%= user.email %></strong></p>
+  <p class="muted">Welcome, <strong><%= (typeof userDisplayName !== 'undefined' && userDisplayName) ? userDisplayName : (user ? (user.username || user.email) : '') %></strong></p>
       <% } %>
       <p class="muted">This environment was created as a safe, invite-only place for novice testers to practice realistic tasks in small, self-contained applications.</p>
       <p class="muted">Below are the available test environments. Click the Details button to view full instructions and open the sandbox.</p>

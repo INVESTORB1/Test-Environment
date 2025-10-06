@@ -12,7 +12,7 @@
       <% if (!user) { %>
         <a href="/admin">Admin</a>
       <% } else { %>
-        Signed in as <%= user.email %> | <a href="/labs">Labs</a> | <a href="/bank">Bank Sandbox</a> | <a href="/logout">Logout</a>
+  Signed in as <%= (typeof userDisplayName !== 'undefined' && userDisplayName) ? userDisplayName : (user ? (user.username || user.email) : '') %> | <a href="/labs">Labs</a> | <a href="/bank">Bank Sandbox</a> | <a href="/logout">Logout</a>
       <% } %>
       </div>
     </header>

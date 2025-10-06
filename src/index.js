@@ -21,7 +21,40 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(session({ secret: 'dev-secret', resave: false, saveUninitialized: false }));
+
+// Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
+let sessionStore = null;
+if (process.env.REDIS_URL) {
+  // lazily require redis-based store
+  try {
+    const Redis = require('ioredis');
+    const RedisStoreFactory = require('connect-redis');
+    const RedisStore = RedisStoreFactory(session);
+    const redisClient = new Redis(process.env.REDIS_URL);
+    sessionStore = new RedisStore({ client: redisClient });
+    console.log('Using Redis session store');
+  } catch (e) {
+    console.warn('REDIS_URL set but failed to initialize Redis store, falling back to SQLite store', e.message);
+  }
+}
+if (!sessionStore) {
+  // fallback to SQLite-backed store using connect-sqlite3
+  const SQLiteStore = require('connect-sqlite3')(session);
+  // ensure sessions directory exists (app writes here)
+  const sessionsDir = path.join(__dirname, 'data', 'sessions');
+  try { require('fs').mkdirSync(sessionsDir, { recursive: true }); } catch (e) { /* ignore */ }
+  sessionStore = new SQLiteStore({ dir: sessionsDir, db: 'sessions.sqlite' });
+  console.log('Using SQLite session store at', sessionsDir);
+}
+
+app.use(session({
+  store: sessionStore,
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 1 day
+}));
 
 // simple middleware to expose user to views
 app.use((req, res, next) => {

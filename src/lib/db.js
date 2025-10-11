@@ -3,6 +3,12 @@ const fs = require('fs');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
+// If MONGODB_URI is provided use Mongo adapter
+if (process.env.MONGODB_URI) {
+  module.exports = require('./db-mongo');
+  return;
+}
+
 // If DATABASE_URL is provided use Postgres, else fallback to SQLite
 if (process.env.DATABASE_URL) {
   // Postgres implementation
@@ -35,6 +41,7 @@ if (process.env.DATABASE_URL) {
       return get('SELECT * FROM users WHERE id = $1', res.rows ? res.rows[0].id : null);
     },
     findUserByEmail: async (email) => get('SELECT * FROM users WHERE email = $1', email),
+  listUsers: async () => all('SELECT * FROM users ORDER BY created_at DESC'),
     createAttempt: async (userId, labId, success, output, durationMs) => {
       const res = await run('INSERT INTO attempts(user_id, lab_id, success, output, duration_ms) VALUES($1,$2,$3,$4,$5) RETURNING *', userId, labId, success ? 1 : 0, output, durationMs);
       return res.rows ? res.rows[0] : null;
@@ -165,6 +172,11 @@ if (process.env.DATABASE_URL) {
     return db.get('SELECT * FROM users WHERE email = ?', email);
   }
 
+  async function listUsers() {
+    const db = await getDb();
+    return db.all('SELECT * FROM users ORDER BY created_at DESC');
+  }
+
   async function createAttempt(userId, labId, success, output, durationMs) {
     const db = await getDb();
     const res = await db.run(
@@ -205,6 +217,7 @@ if (process.env.DATABASE_URL) {
     getAttemptsByUser,
     createBankTemplate,
     listBankTemplates,
+  listUsers,
     // audits
     logAudit: async (actor, action, details) => {
       const db = await getDb();

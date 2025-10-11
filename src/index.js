@@ -25,6 +25,19 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 let sessionStore = null;
+// prefer Mongo session store when MONGODB_URI is set
+if (process.env.MONGODB_URI) {
+  try {
+    const MongoStoreFactory = require('connect-mongo');
+    // connect-mongo v4 exports a factory function that works with express-session
+    const MongoStore = MongoStoreFactory.create ? MongoStoreFactory.create : MongoStoreFactory(session);
+    sessionStore = MongoStore.create ? MongoStore.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 }) : new MongoStore({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
+    console.log('Using MongoDB session store');
+  } catch (e) {
+    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores', e.message);
+    sessionStore = null;
+  }
+}
 if (process.env.REDIS_URL) {
   // lazily require redis-based store
   try {
@@ -172,6 +185,29 @@ app.get('/admin', requireAdmin, async (req, res) => {
   const invites = await db.allInvites();
   const testers = await db.listTesters();
   res.render('admin', { invites, testers });
+});
+
+// Admin: list created users
+app.get('/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const users = await db.listUsers();
+    res.render('admin-users', { users });
+  } catch (e) {
+    req.session.adminFlash = { type: 'error', msg: 'Failed to fetch users' };
+    res.redirect('/admin');
+  }
+});
+
+// Dev debug route: show DB file used and list testers (protected)
+app.get('/admin/debug', requireAdmin, async (req, res) => {
+  try {
+    const dataDir = process.env.DATA_DIR || path.join(__dirname, 'data');
+    const dbFile = path.join(dataDir, 'app.db');
+    const testers = await db.listTesters();
+    res.json({ dbFile, testers });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 // Admin: create tester user (username + optional email)

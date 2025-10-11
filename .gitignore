@@ -26,4 +26,4 @@ coverage/
 Thumbs.db
 
 # npm lock
-package-lock.json
+

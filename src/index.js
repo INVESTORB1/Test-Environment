@@ -25,7 +25,27 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 let sessionStore = null;
-// (MongoDB session support removed) prefer Redis when REDIS_URL is provided, else use SQLite store.
+// Prefer Mongo session store when MONGODB_URI is set (connect-mongo v4 API)
+if (process.env.MONGODB_URI) {
+  try {
+    // try to require connect-mongo; if not installed we'll fall back silently
+    const ConnectMongo = require('connect-mongo');
+    if (ConnectMongo && typeof ConnectMongo.create === 'function') {
+      sessionStore = ConnectMongo.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
+      console.log('Using MongoDB session store');
+    } else if (ConnectMongo && ConnectMongo.default && typeof ConnectMongo.default.create === 'function') {
+      // handle possible transpiled default export
+      sessionStore = ConnectMongo.default.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
+      console.log('Using MongoDB session store');
+    } else {
+      console.warn('MONGODB_URI set but connect-mongo does not expose create(); please install connect-mongo@4');
+    }
+  } catch (e) {
+    console.warn('MONGODB_URI set but connect-mongo not installed or failed to initialize; falling back to other stores. To enable Mongo sessions run: npm install connect-mongo mongodb');
+    sessionStore = null;
+  }
+}
+// prefer Redis when REDIS_URL is provided, else use SQLite store.
 if (process.env.REDIS_URL) {
   // lazily require redis-based store
   try {

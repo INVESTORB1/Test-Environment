@@ -25,25 +25,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 let sessionStore = null;
-// prefer Mongo session store when MONGODB_URI is set
-if (process.env.MONGODB_URI) {
-  try {
-    const ConnectMongo = require('connect-mongo');
-    // connect-mongo v4+: exports { create: fn } where create returns a Store instance
-    if (typeof ConnectMongo.create === 'function') {
-      sessionStore = ConnectMongo.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
-    } else {
-      // older connect-mongo (v3) exports a function that accepts session and returns a constructor
-      const MongoStoreCtor = ConnectMongo(session);
-      // older API expects `url` option
-      sessionStore = new MongoStoreCtor({ url: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
-    }
-    console.log('Using MongoDB session store');
-  } catch (e) {
-    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores', e.message);
-    sessionStore = null;
-  }
-}
+// (MongoDB session support removed) prefer Redis when REDIS_URL is provided, else use SQLite store.
 if (process.env.REDIS_URL) {
   // lazily require redis-based store
   try {

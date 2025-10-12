@@ -10,6 +10,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const MONGODB_URI = process.env.MONGODB_URI || null;
 let mongoClient = null;
 let mongoTestersColl = null;
+let mongoAdminTestersColl = null;
 async function initMongoIfConfigured() {
   if (!MONGODB_URI) return null;
   if (mongoClient && mongoTestersColl) return { client: mongoClient, coll: mongoTestersColl };
@@ -19,10 +20,14 @@ async function initMongoIfConfigured() {
     await mongoClient.connect();
     const dbName = process.env.MONGODB_DB || (new URL(MONGODB_URI)).pathname.replace(/^\//, '') || 'test';
     const db = mongoClient.db(dbName);
-    mongoTestersColl = db.collection('testers');
-    // Ensure unique indexes on username and email to preserve duplicate semantics
-    await mongoTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
-    await mongoTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
+  mongoTestersColl = db.collection('testers');
+  mongoAdminTestersColl = db.collection('admin_testers');
+  // Ensure unique indexes on username and email to preserve duplicate semantics
+  await mongoTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
+  await mongoTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
+  // admin_testers should follow same uniqueness constraints
+  await mongoAdminTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
+  await mongoAdminTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
     console.log('Connected to MongoDB for shared testers at', MONGODB_URI);
     return { client: mongoClient, coll: mongoTestersColl };
   } catch (e) {
@@ -92,6 +97,23 @@ if (process.env.DATABASE_URL) {
         }
         throw err;
       }
+    },
+    // create an admin-scoped tester (try Mongo admin_testers when available; fallback to regular create)
+    createAdminTester: async (username, email) => {
+      try {
+        // ensure mongo client is initialized if configured
+        await initMongoIfConfigured();
+        if (mongoAdminTestersColl) {
+          const now = new Date().toISOString();
+          const insert = { username, email: email || null, last_used: null, created_at: now };
+          const res = await mongoAdminTestersColl.insertOne(insert);
+          return { id: res.insertedId ? String(res.insertedId) : null, username, email: email || null, last_used: null, created_at: now };
+        }
+      } catch (e) {
+        // ignore and fallback
+      }
+      // fallback to normal createTester (postgres)
+      return module.exports.createTester(username, email);
     },
     listTesters: async () => all('SELECT * FROM testers ORDER BY id'),
     findTesterByUsername: async (username) => get('SELECT * FROM testers WHERE username = $1', username),
@@ -341,6 +363,21 @@ if (process.env.DATABASE_URL) {
       // Create and return the created tester object
       return module.exports._testersStore.create(username, email);
     },
+    createAdminTester: async (username, email) => {
+      // try to create in Mongo admin_testers when configured; else fall back to local testers
+      try {
+        await initMongoIfConfigured();
+        if (mongoAdminTestersColl) {
+          const now = new Date().toISOString();
+          const insert = { username, email: email || null, last_used: null, created_at: now };
+          const res = await mongoAdminTestersColl.insertOne(insert);
+          return { id: res.insertedId ? String(res.insertedId) : null, username, email: email || null, last_used: null, created_at: now };
+        }
+      } catch (e) {
+        // fall through
+      }
+      return module.exports._testersStore.create(username, email);
+    },
     listTesters: async () => {
       return module.exports._testersStore.all();
     },
@@ -435,42 +472,83 @@ if (process.env.DATABASE_URL) {
       }
     };
     exported.listTesters = async () => {
-      const docs = await mongoTestersColl.find({}).sort({ created_at: 1 }).toArray();
-      return docs.map(mapDoc);
+      // combine both regular testers and admin-created testers so admin UI shows both
+      const [docsA, docsB] = await Promise.all([
+        mongoTestersColl.find({}).toArray(),
+        mongoAdminTestersColl.find({}).toArray()
+      ]);
+      const all = docsA.concat(docsB).sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+      });
+      return all.map(mapDoc);
     };
     exported.findTesterByUsername = async (username) => {
-      const doc = await mongoTestersColl.findOne({ username });
+      // search admin_testers first, then testers
+      const doc = await mongoAdminTestersColl.findOne({ username }) || await mongoTestersColl.findOne({ username });
       return mapDoc(doc);
     };
     exported.findTesterByEmail = async (email) => {
-      const doc = await mongoTestersColl.findOne({ email });
+      const doc = await mongoAdminTestersColl.findOne({ email }) || await mongoTestersColl.findOne({ email });
       return mapDoc(doc);
     };
     exported.deleteTester = async (id) => {
-      // try numeric sqlite_id first
+      // try numeric sqlite_id first across both collections
       const maybeNum = Number(id);
       if (!Number.isNaN(maybeNum)) {
-        const res = await mongoTestersColl.deleteOne({ sqlite_id: maybeNum });
-        return { changes: res.deletedCount };
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ sqlite_id: maybeNum }),
+          mongoAdminTestersColl.deleteOne({ sqlite_id: maybeNum })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
       }
-      // try _id
+      // try _id in both collections
       try {
         const { ObjectId } = require('mongodb');
         const oid = ObjectId.isValid(id) ? new ObjectId(id) : id;
-        const res = await mongoTestersColl.deleteOne({ _id: oid });
-        return { changes: res.deletedCount };
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ _id: oid }),
+          mongoAdminTestersColl.deleteOne({ _id: oid })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
       } catch (e) {
-        const res = await mongoTestersColl.deleteOne({ _id: id });
-        return { changes: res.deletedCount };
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ _id: id }),
+          mongoAdminTestersColl.deleteOne({ _id: id })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
       }
     };
     exported.updateTesterLastUsed = async (username, when) => {
-      const res = await mongoTestersColl.updateOne({ username }, { $set: { last_used: when } });
-      return { changes: res.modifiedCount || res.matchedCount };
+      const res = await mongoAdminTestersColl.updateOne({ username }, { $set: { last_used: when } });
+      if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+      const res2 = await mongoTestersColl.updateOne({ username }, { $set: { last_used: when } });
+      return { changes: res2.modifiedCount || res2.matchedCount };
     };
     exported.updateTesterLastUsedByEmail = async (email, when) => {
-      const res = await mongoTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
-      return { changes: res.modifiedCount || res.matchedCount };
+      const res = await mongoAdminTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+      if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+      const res2 = await mongoTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+      return { changes: res2.modifiedCount || res2.matchedCount };
+    };
+
+    // allow creating testers specifically as admin-created entries
+    exported.createAdminTester = async (username, email) => {
+      if (!username) throw new Error('username required');
+      try {
+        const now = new Date().toISOString();
+        const insert = { username, email: email || null, last_used: null, created_at: now };
+        const res = await mongoAdminTestersColl.insertOne(insert);
+        return mapDoc({ ...insert, _id: res.insertedId });
+      } catch (err) {
+        if (err && (err.code === 11000 || (err.code && String(err.code).includes('11000')))) {
+          const e = new Error('duplicate');
+          e.code = 'DUPLICATE_TESTER';
+          throw e;
+        }
+        throw err;
+      }
     };
   }
 })();

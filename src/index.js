@@ -209,7 +209,13 @@ app.post('/admin/testers', requireAdmin, async (req, res) => {
   const username = req.body.username;
   const email = req.body.email || null;
   try {
-    await db.createTester(username, email);
+    // prefer admin-scoped tester insert when available so admin-created testers
+    // are stored separately in Mongo (`admin_testers`) if configured
+    if (typeof db.createAdminTester === 'function') {
+      await db.createAdminTester(username, email);
+    } else {
+      await db.createTester(username, email);
+    }
     await db.logAudit(req.session.user ? req.session.user.email : 'admin', 'create_tester', `username=${username} email=${email}`);
     req.session.adminFlash = { type: 'success', msg: `Tester '${username}' created` };
   } catch (err) {

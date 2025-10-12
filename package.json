@@ -22,7 +22,8 @@
     "sqlite": "^4.0.23",
     "sqlite3": "^5.1.6",
     "uuid": "^9.0.0",
-    "mongodb": "^5.7.0"
+    "mongodb": "^5.7.0",
+    "dotenv": "^16.1.4"
   },
   "devDependencies": {
     "jest": "^29.0.0"

@@ -1,3 +1,6 @@
+// Load local .env first (if present). This is optional for production because
+// platform env vars (Render) will override values at runtime.
+try { require('dotenv').config(); } catch (e) { /* dotenv not installed/available */ }
 const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');

@@ -28,55 +28,19 @@ let sessionStore = null;
 // prefer Mongo session store when MONGODB_URI is set
 if (process.env.MONGODB_URI) {
   try {
-    // Be defensive: connect-mongo v4+ exports an object with `create` (or default.create when transpiled),
-    // while older v3 exported a factory function that expects the `session` module.
     const ConnectMongo = require('connect-mongo');
-    const debugMongo = !!process.env.MONGODB_DEBUG;
-    if (debugMongo) {
-      try { console.log('-- MONGODB_DEBUG: connect-mongo export shape:', Object.keys(ConnectMongo || {}).length ? Object.keys(ConnectMongo) : typeof ConnectMongo); } catch (e) { /* ignore */ }
-    }
-    const mongoUri = process.env.MONGODB_URI;
-    const ttlSeconds = 24 * 60 * 60;
-
-    // prefer direct `create` (v4+)
-    if (ConnectMongo && typeof ConnectMongo.create === 'function') {
-      sessionStore = ConnectMongo.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
-    } else if (ConnectMongo && ConnectMongo.default && typeof ConnectMongo.default.create === 'function') {
-      // handle transpiled/default export
-      sessionStore = ConnectMongo.default.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
-    } else if (typeof ConnectMongo === 'function') {
-      // older connect-mongo (v3) or transpiled variants: call factory with session
-      // The factory may return a constructor function, a store instance, or an interop-wrapped object.
-      const factoryResult = ConnectMongo(session);
-      if (debugMongo) {
-        try { console.log('-- MONGODB_DEBUG: connect-mongo factory result type:', factoryResult && typeof factoryResult, Object.keys(factoryResult || {}).slice(0,10)); } catch (e) { /* ignore */ }
-      }
-      if (typeof factoryResult === 'function') {
-        // constructor function
-        sessionStore = new factoryResult({ url: mongoUri, ttl: ttlSeconds });
-      } else if (factoryResult && typeof factoryResult === 'object') {
-        // already a store instance (has get/set) -> use directly
-        if (typeof factoryResult.get === 'function' && typeof factoryResult.set === 'function') {
-          sessionStore = factoryResult;
-        } else {
-          // try common interop shapes: { default: Ctor } or { MongoStore: Ctor }
-          const maybeCtor = factoryResult.default || factoryResult.MongoStore;
-          if (typeof maybeCtor === 'function') {
-            sessionStore = new maybeCtor({ url: mongoUri, ttl: ttlSeconds });
-          } else {
-            throw new Error('connect-mongo factory did not return a constructor or store instance');
-          }
-        }
-      } else {
-        throw new Error('connect-mongo factory returned unexpected type');
-      }
+    // connect-mongo v4+: exports { create: fn } where create returns a Store instance
+    if (typeof ConnectMongo.create === 'function') {
+      sessionStore = ConnectMongo.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
     } else {
-      throw new Error('Unrecognized connect-mongo export shape');
+      // older connect-mongo (v3) exports a function that accepts session and returns a constructor
+      const MongoStoreCtor = ConnectMongo(session);
+      // older API expects `url` option
+      sessionStore = new MongoStoreCtor({ url: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
     }
-
     console.log('Using MongoDB session store');
   } catch (e) {
-    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores:', e && e.message ? e.message : String(e));
+    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores', e.message);
     sessionStore = null;
   }
 }

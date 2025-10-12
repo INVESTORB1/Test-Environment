@@ -41,9 +41,28 @@ if (process.env.MONGODB_URI) {
       // handle transpiled/default export
       sessionStore = ConnectMongo.default.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
     } else if (typeof ConnectMongo === 'function') {
-      // older connect-mongo (v3): call factory with session to get a Store constructor
-      const MongoStoreCtor = ConnectMongo(session);
-      sessionStore = new MongoStoreCtor({ url: mongoUri, ttl: ttlSeconds });
+      // older connect-mongo (v3) or transpiled variants: call factory with session
+      // The factory may return a constructor function, a store instance, or an interop-wrapped object.
+      const factoryResult = ConnectMongo(session);
+      if (typeof factoryResult === 'function') {
+        // constructor function
+        sessionStore = new factoryResult({ url: mongoUri, ttl: ttlSeconds });
+      } else if (factoryResult && typeof factoryResult === 'object') {
+        // already a store instance (has get/set) -> use directly
+        if (typeof factoryResult.get === 'function' && typeof factoryResult.set === 'function') {
+          sessionStore = factoryResult;
+        } else {
+          // try common interop shapes: { default: Ctor } or { MongoStore: Ctor }
+          const maybeCtor = factoryResult.default || factoryResult.MongoStore;
+          if (typeof maybeCtor === 'function') {
+            sessionStore = new maybeCtor({ url: mongoUri, ttl: ttlSeconds });
+          } else {
+            throw new Error('connect-mongo factory did not return a constructor or store instance');
+          }
+        }
+      } else {
+        throw new Error('connect-mongo factory returned unexpected type');
+      }
     } else {
       throw new Error('Unrecognized connect-mongo export shape');
     }

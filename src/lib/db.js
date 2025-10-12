@@ -221,45 +221,77 @@ if (process.env.DATABASE_URL) {
       const db = await getDb();
       return db.all('SELECT * FROM audits ORDER BY created_at DESC');
     },
-    // tester helpers
-    createTester: async (username, email) => {
-      const db = await getDb();
-      try {
-        const res = await db.run('INSERT INTO testers(username,email) VALUES(?,?)', username, email);
-        return db.get('SELECT * FROM testers WHERE id = ?', res.lastID);
-      } catch (err) {
-        // sqlite duplicate error code
-        if (err && err.code === 'SQLITE_CONSTRAINT') {
-          const e = new Error('duplicate');
-          e.code = 'DUPLICATE_TESTER';
-          throw e;
+    // tester helpers (in-memory store)
+    // Note: testers are stored in-memory for this environment so created testers
+    // are available during the process lifetime and used for simple username checks.
+    // This keeps compatibility with the existing API and error semantics.
+    // In-memory store structure: { id, username, email, last_used, created_at }
+    _testersStore: (() => {
+      const arr = [];
+      let nextId = 1;
+      return {
+        all: () => arr.slice(),
+        findByUsername: (u) => arr.find(t => t.username === u) || null,
+        findByEmail: (e) => arr.find(t => t.email === e) || null,
+        create: (username, email) => {
+          if (!username) throw new Error('username required');
+          if (arr.find(t => t.username === username)) {
+            const e = new Error('duplicate');
+            e.code = 'DUPLICATE_TESTER';
+            throw e;
+          }
+          const tester = {
+            id: nextId++,
+            username,
+            email: email || null,
+            last_used: null,
+            created_at: new Date().toISOString()
+          };
+          arr.push(tester);
+          return tester;
+        },
+        deleteById: (id) => {
+          const idx = arr.findIndex(t => Number(t.id) === Number(id));
+          if (idx === -1) return { changes: 0 };
+          arr.splice(idx, 1);
+          return { changes: 1 };
+        },
+        updateLastUsedByUsername: (username, when) => {
+          const t = arr.find(x => x.username === username);
+          if (!t) return { changes: 0 };
+          t.last_used = when;
+          return { changes: 1 };
+        },
+        updateLastUsedByEmailOrUsername: (emailOrUsername, when) => {
+          const t = arr.find(x => x.email === emailOrUsername || x.username === emailOrUsername);
+          if (!t) return { changes: 0 };
+          t.last_used = when;
+          return { changes: 1 };
         }
-        throw err;
-      }
+      };
+    })(),
+
+    createTester: async (username, email) => {
+      // Create and return the created tester object
+      return module.exports._testersStore.create(username, email);
     },
     listTesters: async () => {
-      const db = await getDb();
-      return db.all('SELECT * FROM testers ORDER BY id');
+      return module.exports._testersStore.all();
     },
     findTesterByUsername: async (username) => {
-      const db = await getDb();
-      return db.get('SELECT * FROM testers WHERE username = ?', username);
+      return module.exports._testersStore.findByUsername(username);
     },
     findTesterByEmail: async (email) => {
-      const db = await getDb();
-      return db.get('SELECT * FROM testers WHERE email = ?', email);
+      return module.exports._testersStore.findByEmail(email);
     },
     deleteTester: async (id) => {
-      const db = await getDb();
-      return db.run('DELETE FROM testers WHERE id = ?', id);
+      return module.exports._testersStore.deleteById(id);
     },
     updateTesterLastUsed: async (username, when) => {
-      const db = await getDb();
-      return db.run('UPDATE testers SET last_used = ? WHERE username = ?', when, username);
+      return module.exports._testersStore.updateLastUsedByUsername(username, when);
     },
     updateTesterLastUsedByEmail: async (email, when) => {
-      const db = await getDb();
-      return db.run('UPDATE testers SET last_used = ? WHERE email = ? OR username = ?', when, email, email);
+      return module.exports._testersStore.updateLastUsedByEmailOrUsername(email, when);
     }
   };
 

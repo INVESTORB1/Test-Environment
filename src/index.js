@@ -28,20 +28,49 @@ let sessionStore = null;
 // Prefer Mongo session store when MONGODB_URI is set (connect-mongo v4 API)
 if (process.env.MONGODB_URI) {
   try {
-    // try to require connect-mongo; if not installed we'll fall back silently
     const ConnectMongo = require('connect-mongo');
+    const mongoUri = process.env.MONGODB_URI;
+    const ttlSeconds = 24 * 60 * 60;
+
+    // v4+ preferred: ConnectMongo.create()
     if (ConnectMongo && typeof ConnectMongo.create === 'function') {
-      sessionStore = ConnectMongo.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
-      console.log('Using MongoDB session store');
+      sessionStore = ConnectMongo.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
+      console.log('Using MongoDB session store (connect-mongo v4 create)');
     } else if (ConnectMongo && ConnectMongo.default && typeof ConnectMongo.default.create === 'function') {
-      // handle possible transpiled default export
-      sessionStore = ConnectMongo.default.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
-      console.log('Using MongoDB session store');
+      // transpiled default
+      sessionStore = ConnectMongo.default.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
+      console.log('Using MongoDB session store (connect-mongo v4 default.create)');
+    } else if (typeof ConnectMongo === 'function') {
+      // older v3 factory: call with session to get a constructor or store instance
+      try {
+        const factoryResult = ConnectMongo(session);
+        if (typeof factoryResult === 'function') {
+          // constructor function
+          sessionStore = new factoryResult({ url: mongoUri, ttl: ttlSeconds });
+          console.log('Using MongoDB session store (connect-mongo v3 constructor)');
+        } else if (factoryResult && typeof factoryResult === 'object') {
+          // factory returned a store instance already
+          if (typeof factoryResult.get === 'function' && typeof factoryResult.set === 'function') {
+            sessionStore = factoryResult;
+            console.log('Using MongoDB session store (connect-mongo v3 instance)');
+          } else if (factoryResult.default && typeof factoryResult.default === 'function') {
+            sessionStore = new factoryResult.default({ url: mongoUri, ttl: ttlSeconds });
+            console.log('Using MongoDB session store (connect-mongo v3 interop.default)');
+          } else {
+            throw new Error('connect-mongo factory did not return a constructor or store instance');
+          }
+        } else {
+          throw new Error('Unexpected return value from connect-mongo factory');
+        }
+      } catch (innerErr) {
+        console.warn('MONGODB_URI set but failed to initialize connect-mongo factory:', innerErr && innerErr.message ? innerErr.message : innerErr);
+        sessionStore = null;
+      }
     } else {
-      console.warn('MONGODB_URI set but connect-mongo does not expose create(); please install connect-mongo@4');
+      console.warn('MONGODB_URI set but connect-mongo export shape not recognized; ensure connect-mongo@4 is installed for simplest configuration');
     }
   } catch (e) {
-    console.warn('MONGODB_URI set but connect-mongo not installed or failed to initialize; falling back to other stores. To enable Mongo sessions run: npm install connect-mongo mongodb');
+    console.warn('MONGODB_URI set but connect-mongo not installed or failed to initialize; falling back to other stores. To enable Mongo sessions run: npm install connect-mongo mongodb', e && e.message ? e.message : e);
     sessionStore = null;
   }
 }

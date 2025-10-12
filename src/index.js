@@ -28,13 +28,29 @@ let sessionStore = null;
 // prefer Mongo session store when MONGODB_URI is set
 if (process.env.MONGODB_URI) {
   try {
-    const MongoStoreFactory = require('connect-mongo');
-    // connect-mongo v4 exports a factory function that works with express-session
-    const MongoStore = MongoStoreFactory.create ? MongoStoreFactory.create : MongoStoreFactory(session);
-    sessionStore = MongoStore.create ? MongoStore.create({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 }) : new MongoStore({ mongoUrl: process.env.MONGODB_URI, ttl: 24 * 60 * 60 });
+    // Be defensive: connect-mongo v4+ exports an object with `create` (or default.create when transpiled),
+    // while older v3 exported a factory function that expects the `session` module.
+    const ConnectMongo = require('connect-mongo');
+    const mongoUri = process.env.MONGODB_URI;
+    const ttlSeconds = 24 * 60 * 60;
+
+    // prefer direct `create` (v4+)
+    if (ConnectMongo && typeof ConnectMongo.create === 'function') {
+      sessionStore = ConnectMongo.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
+    } else if (ConnectMongo && ConnectMongo.default && typeof ConnectMongo.default.create === 'function') {
+      // handle transpiled/default export
+      sessionStore = ConnectMongo.default.create({ mongoUrl: mongoUri, ttl: ttlSeconds });
+    } else if (typeof ConnectMongo === 'function') {
+      // older connect-mongo (v3): call factory with session to get a Store constructor
+      const MongoStoreCtor = ConnectMongo(session);
+      sessionStore = new MongoStoreCtor({ url: mongoUri, ttl: ttlSeconds });
+    } else {
+      throw new Error('Unrecognized connect-mongo export shape');
+    }
+
     console.log('Using MongoDB session store');
   } catch (e) {
-    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores', e.message);
+    console.warn('MONGODB_URI set but failed to initialize connect-mongo, falling back to other session stores:', e && e.message ? e.message : String(e));
     sessionStore = null;
   }
 }

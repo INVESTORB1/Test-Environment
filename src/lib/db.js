@@ -3,6 +3,36 @@ const fs = require('fs');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
+// If MONGODB_URI is present, provide a Mongo-backed testers collection so
+// multiple deployments (localhost, Render) can share the same testers data.
+// This augments the existing DATABASE_URL/Postgres or SQLite code paths by
+// overriding only the testers-related functions when a Mongo connection exists.
+const MONGODB_URI = process.env.MONGODB_URI || null;
+let mongoClient = null;
+let mongoTestersColl = null;
+async function initMongoIfConfigured() {
+  if (!MONGODB_URI) return null;
+  if (mongoClient && mongoTestersColl) return { client: mongoClient, coll: mongoTestersColl };
+  try {
+    const { MongoClient } = require('mongodb');
+    mongoClient = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    await mongoClient.connect();
+    const dbName = process.env.MONGODB_DB || (new URL(MONGODB_URI)).pathname.replace(/^\//, '') || 'test';
+    const db = mongoClient.db(dbName);
+    mongoTestersColl = db.collection('testers');
+    // Ensure unique indexes on username and email to preserve duplicate semantics
+    await mongoTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
+    await mongoTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
+    console.log('Connected to MongoDB for shared testers at', MONGODB_URI);
+    return { client: mongoClient, coll: mongoTestersColl };
+  } catch (e) {
+    console.warn('MONGODB_URI set but failed to initialize MongoDB client, falling back to local testers:', e && e.message ? e.message : e);
+    mongoClient = null;
+    mongoTestersColl = null;
+    return null;
+  }
+}
+
 // If DATABASE_URL is provided use Postgres, else fallback to SQLite
 if (process.env.DATABASE_URL) {
   // Postgres implementation
@@ -321,14 +351,126 @@ if (process.env.DATABASE_URL) {
       return module.exports._testersStore.findByEmail(email);
     },
     deleteTester: async (id) => {
+      // if Mongo is configured, attempt to delete from Mongo collection as well
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          // Mongo expects an ObjectId or native id; we store numeric ids in sqlite, so we'll try numeric first
+          const maybeNum = Number(id);
+          if (!Number.isNaN(maybeNum)) {
+            const res = await m.coll.deleteOne({ sqlite_id: maybeNum });
+            if (res && res.deletedCount) return { changes: res.deletedCount };
+          }
+          // fallback to deleting by _id string
+          const res2 = await m.coll.deleteOne({ _id: id });
+          if (res2 && res2.deletedCount) return { changes: res2.deletedCount };
+        }
+      } catch (e) {
+        // ignore mongo delete errors and fall back to local
+      }
       return module.exports._testersStore.deleteById(id);
     },
     updateTesterLastUsed: async (username, when) => {
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          const res = await m.coll.updateOne({ username }, { $set: { last_used: when } });
+          if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+        }
+      } catch (e) {}
       return module.exports._testersStore.updateLastUsedByUsername(username, when);
     },
     updateTesterLastUsedByEmail: async (email, when) => {
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          const res = await m.coll.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+          if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+        }
+      } catch (e) {}
       return module.exports._testersStore.updateLastUsedByEmailOrUsername(email, when);
     }
   };
 
 }
+
+// If Mongo is configured, override testers functions used in the Postgres branch
+// (when DATABASE_URL is present) too. This keeps a single shared implementation
+// for testers when MONGODB_URI is set.
+(async () => {
+  if (!MONGODB_URI) return;
+  // Initialize mongo client but do not block module load on network
+  await initMongoIfConfigured();
+  if (!mongoTestersColl) return;
+  // Helper to map mongo doc to the shape used elsewhere
+  const mapDoc = (doc) => {
+    if (!doc) return null;
+    return {
+      id: doc.sqlite_id || String(doc._id),
+      username: doc.username,
+      email: doc.email || null,
+      last_used: doc.last_used || null,
+      created_at: doc.created_at || (doc._id && doc._id.getTimestamp && doc._id.getTimestamp().toISOString()) || null
+    };
+  };
+  // Attach Mongo-backed implementations where appropriate
+  const exported = module.exports;
+  if (exported) {
+    // createTester: maintain duplicate semantics
+    exported.createTester = async (username, email) => {
+      if (!username) throw new Error('username required');
+      try {
+        const now = new Date().toISOString();
+        const insert = { username, email: email || null, last_used: null, created_at: now };
+        const res = await mongoTestersColl.insertOne(insert);
+        return mapDoc({ ...insert, _id: res.insertedId });
+      } catch (err) {
+        // duplicate key
+        if (err && (err.code === 11000 || (err.code && String(err.code).includes('11000')))) {
+          const e = new Error('duplicate');
+          e.code = 'DUPLICATE_TESTER';
+          throw e;
+        }
+        throw err;
+      }
+    };
+    exported.listTesters = async () => {
+      const docs = await mongoTestersColl.find({}).sort({ created_at: 1 }).toArray();
+      return docs.map(mapDoc);
+    };
+    exported.findTesterByUsername = async (username) => {
+      const doc = await mongoTestersColl.findOne({ username });
+      return mapDoc(doc);
+    };
+    exported.findTesterByEmail = async (email) => {
+      const doc = await mongoTestersColl.findOne({ email });
+      return mapDoc(doc);
+    };
+    exported.deleteTester = async (id) => {
+      // try numeric sqlite_id first
+      const maybeNum = Number(id);
+      if (!Number.isNaN(maybeNum)) {
+        const res = await mongoTestersColl.deleteOne({ sqlite_id: maybeNum });
+        return { changes: res.deletedCount };
+      }
+      // try _id
+      try {
+        const { ObjectId } = require('mongodb');
+        const oid = ObjectId.isValid(id) ? new ObjectId(id) : id;
+        const res = await mongoTestersColl.deleteOne({ _id: oid });
+        return { changes: res.deletedCount };
+      } catch (e) {
+        const res = await mongoTestersColl.deleteOne({ _id: id });
+        return { changes: res.deletedCount };
+      }
+    };
+    exported.updateTesterLastUsed = async (username, when) => {
+      const res = await mongoTestersColl.updateOne({ username }, { $set: { last_used: when } });
+      return { changes: res.modifiedCount || res.matchedCount };
+    };
+    exported.updateTesterLastUsedByEmail = async (email, when) => {
+      const res = await mongoTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+      return { changes: res.modifiedCount || res.matchedCount };
+    };
+  }
+})();

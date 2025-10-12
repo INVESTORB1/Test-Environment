@@ -3,12 +3,6 @@ const fs = require('fs');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
-// If MONGODB_URI is provided use Mongo adapter
-if (process.env.MONGODB_URI) {
-  module.exports = require('./db-mongo');
-  return;
-}
-
 // If DATABASE_URL is provided use Postgres, else fallback to SQLite
 if (process.env.DATABASE_URL) {
   // Postgres implementation

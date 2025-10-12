@@ -31,6 +31,10 @@ if (process.env.MONGODB_URI) {
     // Be defensive: connect-mongo v4+ exports an object with `create` (or default.create when transpiled),
     // while older v3 exported a factory function that expects the `session` module.
     const ConnectMongo = require('connect-mongo');
+    const debugMongo = !!process.env.MONGODB_DEBUG;
+    if (debugMongo) {
+      try { console.log('-- MONGODB_DEBUG: connect-mongo export shape:', Object.keys(ConnectMongo || {}).length ? Object.keys(ConnectMongo) : typeof ConnectMongo); } catch (e) { /* ignore */ }
+    }
     const mongoUri = process.env.MONGODB_URI;
     const ttlSeconds = 24 * 60 * 60;
 
@@ -44,6 +48,9 @@ if (process.env.MONGODB_URI) {
       // older connect-mongo (v3) or transpiled variants: call factory with session
       // The factory may return a constructor function, a store instance, or an interop-wrapped object.
       const factoryResult = ConnectMongo(session);
+      if (debugMongo) {
+        try { console.log('-- MONGODB_DEBUG: connect-mongo factory result type:', factoryResult && typeof factoryResult, Object.keys(factoryResult || {}).slice(0,10)); } catch (e) { /* ignore */ }
+      }
       if (typeof factoryResult === 'function') {
         // constructor function
         sessionStore = new factoryResult({ url: mongoUri, ttl: ttlSeconds });

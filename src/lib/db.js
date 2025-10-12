@@ -227,12 +227,44 @@ if (process.env.DATABASE_URL) {
     // This keeps compatibility with the existing API and error semantics.
     // In-memory store structure: { id, username, email, last_used, created_at }
     _testersStore: (() => {
-      const arr = [];
+      // persistent testers file
+      const TESTERS_FILE = path.join(DATA_DIR, 'testers.json');
+      try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* ignore */ }
+
+      // load existing testers if present
+      let arr = [];
       let nextId = 1;
+      try {
+        if (fs.existsSync(TESTERS_FILE)) {
+          const raw = fs.readFileSync(TESTERS_FILE, 'utf8');
+          const parsed = JSON.parse(raw || '[]');
+          if (Array.isArray(parsed)) {
+            arr = parsed.map((t) => ({ ...t }));
+            // compute next id
+            nextId = arr.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load testers.json, starting with empty list:', e && e.message ? e.message : e);
+        arr = [];
+        nextId = 1;
+      }
+      // persist helper: write atomically
+      const persist = (items) => {
+        try {
+          const tmp = TESTERS_FILE + '.tmp';
+          fs.writeFileSync(tmp, JSON.stringify(items, null, 2), 'utf8');
+          fs.renameSync(tmp, TESTERS_FILE);
+        } catch (e) {
+          console.warn('Failed to persist testers.json:', e && e.message ? e.message : e);
+        }
+      };
+
       return {
         all: () => arr.slice(),
         findByUsername: (u) => arr.find(t => t.username === u) || null,
         findByEmail: (e) => arr.find(t => t.email === e) || null,
+
         create: (username, email) => {
           if (!username) throw new Error('username required');
           if (arr.find(t => t.username === username)) {
@@ -248,24 +280,28 @@ if (process.env.DATABASE_URL) {
             created_at: new Date().toISOString()
           };
           arr.push(tester);
+          persist(arr);
           return tester;
         },
         deleteById: (id) => {
           const idx = arr.findIndex(t => Number(t.id) === Number(id));
           if (idx === -1) return { changes: 0 };
           arr.splice(idx, 1);
+          persist(arr);
           return { changes: 1 };
         },
         updateLastUsedByUsername: (username, when) => {
           const t = arr.find(x => x.username === username);
           if (!t) return { changes: 0 };
           t.last_used = when;
+          persist(arr);
           return { changes: 1 };
         },
         updateLastUsedByEmailOrUsername: (emailOrUsername, when) => {
           const t = arr.find(x => x.email === emailOrUsername || x.username === emailOrUsername);
           if (!t) return { changes: 0 };
           t.last_used = when;
+          persist(arr);
           return { changes: 1 };
         }
       };

@@ -32,6 +32,8 @@ app.use(express.json());
 // Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 let sessionStore = null;
+// track which store we initialized for runtime diagnostics
+let sessionStoreType = 'memory';
 // Prefer MongoDB session store when MONGODB_URI is provided (supports connect-mongo v4+),
 // else prefer Redis when REDIS_URL is provided, else use SQLite store.
 if (process.env.MONGODB_URI) {
@@ -57,7 +59,8 @@ if (process.env.MONGODB_URI) {
     } else {
       throw new Error('connect-mongo: unexpected export shape: ' + String(Object.keys(maybe || {})));
     }
-    console.log('Using MongoDB session store');
+  sessionStoreType = 'mongo';
+  console.log('Using MongoDB session store');
   } catch (e) {
     // don't crash if module isn't installed or fails to initialize; fall through to other stores
     console.warn('MONGODB_URI set but failed to initialize connect-mongo; falling back to other session stores', e && e.message);
@@ -74,6 +77,7 @@ if (process.env.REDIS_URL) {
     const RedisStore = RedisStoreFactory(session);
     const redisClient = new Redis(process.env.REDIS_URL);
     sessionStore = new RedisStore({ client: redisClient });
+    sessionStoreType = 'redis';
     console.log('Using Redis session store');
   } catch (e) {
     console.warn('REDIS_URL set but failed to initialize Redis store, falling back to SQLite store', e.message);
@@ -86,8 +90,9 @@ if (!sessionStore) {
     // ensure sessions directory exists (app writes here)
     const sessionsDir = path.join(__dirname, 'data', 'sessions');
     try { require('fs').mkdirSync(sessionsDir, { recursive: true }); } catch (e) { /* ignore */ }
-    sessionStore = new SQLiteStore({ dir: sessionsDir, db: 'sessions.sqlite' });
-    console.log('Using SQLite session store at', sessionsDir);
+  sessionStore = new SQLiteStore({ dir: sessionsDir, db: 'sessions.sqlite' });
+  sessionStoreType = 'sqlite';
+  console.log('Using SQLite session store at', sessionsDir);
   } catch (err) {
     // If the module isn't installed or fails to load we must not crash the app.
     console.warn('connect-sqlite3 not available; falling back to in-memory session store.');
@@ -249,7 +254,15 @@ app.get('/admin/debug', requireAdmin, async (req, res) => {
     const dataDir = process.env.DATA_DIR || path.join(__dirname, 'data');
     const dbFile = path.join(dataDir, 'app.db');
     const testers = await db.listTesters();
-    res.json({ dbFile, testers });
+    // try to include the current git commit (if .git is present) and which session store we initialized
+    let gitCommit = null;
+    try {
+      const cp = require('child_process');
+      gitCommit = cp.execSync('git rev-parse --short HEAD').toString().trim();
+    } catch (e) {
+      gitCommit = process.env.GIT_COMMIT || null;
+    }
+    res.json({ dbFile, testers, gitCommit, sessionStoreType });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

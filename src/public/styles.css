@@ -109,6 +109,15 @@ th, td { padding:10px; border-bottom:1px solid #eef3f8 }
 .bank-page .btn { background: var(--btn-bg); color: white }
 .bank-page .accounts-table thead { background:#fbfdff }
 
+/* Ensure danger buttons inside bank pages keep their red styling (override bank-page .btn) */
+.bank-page .btn.btn-danger,
+.bank-page .btn-danger {
+	background: #ff6b6b !important;
+	color: #ffffff !important;
+	border: 0 !important;
+}
+.bank-page .btn-danger:hover { filter: brightness(0.95); }
+
 /* Lab detail page dark theme */
 .lab-detail-page { background: var(--bg); color: var(--text) }
 .lab-detail-page header h1, .lab-detail-page header .muted { color: var(--text) }

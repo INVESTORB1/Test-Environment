@@ -240,8 +240,42 @@ app.get('/admin', requireAdmin, async (req, res) => {
 // Admin: list created users
 app.get('/admin/users', requireAdmin, async (req, res) => {
   try {
-    const users = await db.listUsers();
-    res.render('admin-users', { users });
+    // Fetch users stored in the SQL users table
+    const sqlUsers = await db.listUsers();
+    // Also fetch admin-created testers (may be stored in Mongo or local testers store)
+    let testers = [];
+    try {
+      testers = await db.listTesters();
+    } catch (e) {
+      // ignore if testers listing isn't available for some DB backends
+      testers = [];
+    }
+
+    // Map testers to the same shape used by admin-users view (email, created_at).
+    const testerUsers = testers.map(t => ({
+      email: t.email || (t.username ? `${t.username}@example.com` : ''),
+      created_at: t.created_at || null
+    }));
+
+    // Combine SQL users and tester-derived users, dedupe by email (prefer SQL user data)
+    const combined = [];
+    const seen = new Set();
+    for (const u of sqlUsers) {
+      const e = (u.email || '').toLowerCase();
+      if (!seen.has(e)) {
+        combined.push(u);
+        if (e) seen.add(e);
+      }
+    }
+    for (const t of testerUsers) {
+      const e = (t.email || '').toLowerCase();
+      if (e && !seen.has(e)) {
+        combined.push(t);
+        seen.add(e);
+      }
+    }
+
+    res.render('admin-users', { users: combined });
   } catch (e) {
     req.session.adminFlash = { type: 'error', msg: 'Failed to fetch users' };
     res.redirect('/admin');
@@ -364,6 +398,8 @@ app.post('/admin/invite', requireAdmin, async (req, res) => {
     res.render('invite-created', { email: emailAddr, link, sent: false });
   }
 });
+
+// ...existing code...
 
 // Magic link
 app.get('/auth/magic/:token', async (req, res) => {
@@ -546,6 +582,29 @@ app.post('/bank/accounts/:id/status', requireAuth, async (req, res) => {
   try {
     const acc = await bank.updateAccountStatus(req.sessionID, id, status);
     return res.json({ ok: true, account: acc });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
+});
+
+// AJAX endpoint to delete an account (and its related transactions) in the session DB
+app.post('/bank/accounts/:id/delete', requireAuth, async (req, res) => {
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: 'Missing account id' });
+  try {
+    console.log(`Account delete requested: session=${req.sessionID} account=${id} by=${req.session.user ? req.session.user.email : 'unknown'}`);
+    const result = await bank.deleteAccount(req.sessionID, id);
+    try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'delete_account', `id=${id}`); } catch (e) {}
+    // also report how many transactions reference this account so the client can verify they remain
+    try {
+      const sdb = await sessionDb.getSessionDb(req.sessionID);
+      const cnt = await sdb.get('SELECT COUNT(*) as c FROM transactions WHERE from_account = ? OR to_account = ?', id, id);
+      const txCount = cnt && typeof cnt.c !== 'undefined' ? cnt.c : 0;
+      console.log(`After delete: transactions referencing account ${id}: ${txCount}`);
+      return res.json({ ok: true, deleted: result && result.changes ? result.changes : 0, transactions_remaining: txCount });
+    } catch (e) {
+      return res.json({ ok: true, deleted: result && result.changes ? result.changes : 0 });
+    }
   } catch (e) {
     return res.status(500).json({ error: String(e) });
   }

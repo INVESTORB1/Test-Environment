@@ -5,7 +5,8 @@ const ALLOWED_STATUSES = ['active', 'dormant', 'debit freeze', 'credit freeze', 
 
 async function listAccounts(sessionId) {
   const db = await sessionDb.getSessionDb(sessionId);
-  return db.all('SELECT * FROM accounts ORDER BY id');
+  // only return accounts that haven't been soft-deleted
+  return db.all("SELECT * FROM accounts WHERE deleted_at IS NULL ORDER BY id");
 }
 
 async function createAccount(sessionId, ownerName, initialCents, status = 'active') {
@@ -35,10 +36,10 @@ async function listTransactions(sessionId) {
   const db = await sessionDb.getSessionDb(sessionId);
   // return transactions enriched with owner names for display
   const q = `SELECT t.*, 
-    fa.owner_name AS from_owner_name,
-    ta.owner_name AS to_owner_name,
-    fa.account_number AS from_account_number,
-    ta.account_number AS to_account_number
+    COALESCE(fa.owner_name, t.from_owner_name) AS from_owner_name,
+    COALESCE(ta.owner_name, t.to_owner_name) AS to_owner_name,
+    COALESCE(fa.account_number, t.from_account_number) AS from_account_number,
+    COALESCE(ta.account_number, t.to_account_number) AS to_account_number
     FROM transactions t
     LEFT JOIN accounts fa ON t.from_account = fa.id
     LEFT JOIN accounts ta ON t.to_account = ta.id
@@ -69,7 +70,7 @@ async function transfer(sessionId, fromId, toId, amountCents, note) {
       await db.run('UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ?', amountCents, fromId);
       await db.run('UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ?', amountCents, toId);
       // record account numbers at time of transaction for auditability
-      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from.account_number, to.account_number, amountCents, 'success', note || null);
+  await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,from_owner_name,to_owner_name,amount_cents,status,note) VALUES(?,?,?,?,?,?,?,?,?)', fromId, toId, from.account_number, to.account_number, from.owner_name, to.owner_name, amountCents, 'success', note || null);
       const res = await db.get('SELECT * FROM transactions WHERE id = last_insert_rowid()');
       await db.exec('COMMIT');
       return res;
@@ -109,7 +110,7 @@ async function transfer(sessionId, fromId, toId, amountCents, note) {
         failureNote = String(err);
       }
 
-      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from ? from.account_number : null, to ? to.account_number : null, amountCents, 'failed', failureNote);
+    await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,from_owner_name,to_owner_name,amount_cents,status,note) VALUES(?,?,?,?,?,?,?,?,?)', fromId, toId, from ? from.account_number : null, to ? to.account_number : null, from ? from.owner_name : null, to ? to.owner_name : null, amountCents, 'failed', failureNote);
       return db.get('SELECT * FROM transactions WHERE id = last_insert_rowid()');
     }
   });
@@ -123,4 +124,17 @@ async function updateAccountStatus(sessionId, accountId, newStatus) {
   return db.get('SELECT * FROM accounts WHERE id = ?', accountId);
 }
 
-module.exports = { listAccounts, createAccount, transfer, listTransactions, updateAccountStatus };
+// Delete an account from the session DB.
+// NOTE: we intentionally preserve past transactions for audit/history purposes.
+// Transactions referencing the deleted account will remain in the transactions table
+// and retain their recorded account_number/from_account_number fields so historical
+// activity is not lost when an account is removed from the sandbox.
+async function deleteAccount(sessionId, accountId) {
+  const db = await sessionDb.getSessionDb(sessionId);
+  // Soft-delete the account so we preserve the row for transaction history
+  // and retain owner/account_number for auditing.
+  const res = await db.run('UPDATE accounts SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', accountId);
+  return { changes: res && res.changes ? res.changes : 0 };
+}
+
+module.exports = { listAccounts, createAccount, transfer, listTransactions, updateAccountStatus, deleteAccount };

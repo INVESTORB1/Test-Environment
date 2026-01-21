@@ -296,6 +296,25 @@ function _statusColor(status) {
   return '#e9ecef';
 }
 
+// Reindex the accounts table first column numbers to be sequential (1..n).
+function reindexAccountsTable() {
+  try {
+    const tbody = document.getElementById('accountsTbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach((r, i) => {
+      const td = r.querySelector('td');
+      if (!td) return;
+      // first cell contains the strong element with the visible number
+      const strong = td.querySelector('strong');
+      if (strong) strong.textContent = String(i + 1);
+      else td.textContent = String(i + 1);
+    });
+  } catch (e) {
+    // non-fatal
+  }
+}
+
 // attach event handlers to status dropdowns to send AJAX updates
 function _bindStatusControls() {
   const selects = Array.from(document.querySelectorAll('.status-select'));
@@ -326,6 +345,32 @@ function _bindStatusControls() {
     // initial color
     const badge = sel.parentElement.querySelector('.status-badge');
     if (badge) badge.style.background = _statusColor(sel.value || badge.textContent);
+  });
+
+  // bind delete buttons (if present)
+  const dels = Array.from(document.querySelectorAll('.account-delete'));
+  dels.forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      const accountId = btn.dataset.accountId;
+      const ok = window.confirm('Delete this account? Past transactions will be kept for record-keeping. This action cannot be undone.');
+      if (!ok) return;
+      try {
+  const res = await fetch(`/bank/accounts/${accountId}/delete`, { method: 'POST' });
+  if (!res.ok) throw new Error('Delete failed');
+  const data = await res.json().catch(() => ({}));
+  // remove the table row from DOM
+  const tr = btn.closest('tr');
+  if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+  // immediately reindex visible account numbers for better UX
+  reindexAccountsTable();
+  const txCount = (data && data.transactions_remaining != null) ? data.transactions_remaining : null;
+  showToast(txCount != null ? `Account deleted — ${txCount} transaction(s) retained` : 'Account deleted (transactions retained)', 'success');
+  // allow a short delay and then refresh to ensure account selectors/pagers sync
+  setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 700);
+      } catch (e) {
+        showToast('Failed to delete account', 'error');
+      }
+    });
   });
 }
 

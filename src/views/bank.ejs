@@ -36,9 +36,9 @@
               </tr>
             </thead>
             <tbody id="accountsTbody">
-            <% accounts.forEach(a => { %>
+            <% accounts.forEach((a, idx) => { %>
               <tr>
-                <td><strong><%= a.id %></strong></td>
+                <td><strong><%= idx + 1 %></strong></td>
                 <td><%= a.owner_name %></td>
                 <td class="mono"> <%= a.account_number || ('#' + a.id) %> </td>
                 <td class="right"><%= formatCurrency(a.balance_cents) %></td>
@@ -53,6 +53,8 @@
                     <option value="inactive" <%= cur==='inactive' ? 'selected' : '' %>>inactive</option>
                   </select>
                   <span class="status-badge" style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:12px;font-size:0.85em;background:#d4edda"><%= a.status || 'active' %></span>
+                  <!-- Delete button inserted immediately after status badge -->
+                  <button type="button" class="btn btn-danger btn-sm account-delete" data-account-id="<%= a.id %>" style="margin-left:8px;padding:4px 8px;border-radius:6px;font-size:0.8em">Delete</button>
                 </td>
               </tr>
             <% }) %>

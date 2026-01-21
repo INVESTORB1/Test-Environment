@@ -39,6 +39,7 @@ async function getSessionDb(sessionId) {
       owner_name TEXT,
       account_number TEXT UNIQUE,
       status TEXT DEFAULT 'active',
+      deleted_at DATETIME DEFAULT NULL,
       balance_cents INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -48,6 +49,8 @@ async function getSessionDb(sessionId) {
       to_account INTEGER,
       from_account_number TEXT,
       to_account_number TEXT,
+      from_owner_name TEXT,
+      to_owner_name TEXT,
       amount_cents INTEGER,
       status TEXT,
       note TEXT,
@@ -65,6 +68,10 @@ async function getSessionDb(sessionId) {
     if (!accColNames.includes('status')) {
       await db.exec("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'");
     }
+    // ensure older DBs have a deleted_at column for soft-deletes
+    if (!accColNames.includes('deleted_at')) {
+      await db.exec("ALTER TABLE accounts ADD COLUMN deleted_at DATETIME DEFAULT NULL");
+    }
     const txCols = await db.all("PRAGMA table_info(transactions)");
     const txColNames = txCols.map(c => c.name);
     if (!txColNames.includes('from_account_number')) {
@@ -73,6 +80,12 @@ async function getSessionDb(sessionId) {
     if (!txColNames.includes('to_account_number')) {
       await db.exec('ALTER TABLE transactions ADD COLUMN to_account_number TEXT');
     }
+    if (!txColNames.includes('from_owner_name')) {
+      await db.exec('ALTER TABLE transactions ADD COLUMN from_owner_name TEXT');
+    }
+    if (!txColNames.includes('to_owner_name')) {
+      await db.exec('ALTER TABLE transactions ADD COLUMN to_owner_name TEXT');
+    }
   // populate account_number for existing accounts if missing (use id-based fallback)
   await db.run(`UPDATE accounts SET account_number = (10000000 + id) WHERE account_number IS NULL OR account_number = ''`);
   // ensure status has a sensible default for older DBs
@@ -80,6 +93,9 @@ async function getSessionDb(sessionId) {
     // populate transaction account numbers from accounts table where missing
     await db.run(`UPDATE transactions SET from_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.from_account) WHERE from_account_number IS NULL OR from_account_number = ''`);
     await db.run(`UPDATE transactions SET to_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.to_account) WHERE to_account_number IS NULL OR to_account_number = ''`);
+  // backfill owner names for older transactions using current accounts table where possible
+  await db.run(`UPDATE transactions SET from_owner_name = (SELECT owner_name FROM accounts WHERE accounts.id = transactions.from_account) WHERE from_owner_name IS NULL OR from_owner_name = ''`);
+  await db.run(`UPDATE transactions SET to_owner_name = (SELECT owner_name FROM accounts WHERE accounts.id = transactions.to_account) WHERE to_owner_name IS NULL OR to_owner_name = ''`);
   } catch (e) {
     // migration best-effort, non-fatal
     try { console.warn('session DB migration warning:', e && e.message); } catch (e2) {}

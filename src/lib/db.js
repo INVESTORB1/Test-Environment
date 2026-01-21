@@ -3,10 +3,51 @@ const fs = require('fs');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
-// If MONGODB_URI is provided use Mongo adapter
-if (process.env.MONGODB_URI) {
-  module.exports = require('./db-mongo');
-  return;
+// If MONGODB_URI is present, provide a Mongo-backed testers collection so
+// multiple deployments (localhost, Render) can share the same testers data.
+// This augments the existing DATABASE_URL/Postgres or SQLite code paths by
+// overriding only the testers-related functions when a Mongo connection exists.
+const MONGODB_URI = process.env.MONGODB_URI || null;
+let mongoClient = null;
+let mongoTestersColl = null;
+let mongoAdminTestersColl = null;
+async function initMongoIfConfigured() {
+  if (!MONGODB_URI) return null;
+  if (mongoClient && mongoTestersColl) return { client: mongoClient, coll: mongoTestersColl };
+  try {
+    const { MongoClient } = require('mongodb');
+    // mongodb v4+ removed some legacy options; pass only the URI and let the driver
+    // choose sensible defaults. Also avoid using the WHATWG URL parser on
+    // mongodb+srv URIs which will throw — parse the DB name more defensively.
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+    const dbName = process.env.MONGODB_DB || (function () {
+      try {
+        const u = new URL(MONGODB_URI);
+        return u.pathname ? u.pathname.replace(/^\//, '') : 'test';
+      } catch (e) {
+        // fallback: try to extract the path segment after the host
+        const m = String(MONGODB_URI).match(/\/([^/?]+)(?:[?]|$)/);
+        return (m && m[1]) ? m[1] : 'test';
+      }
+    })();
+    const db = mongoClient.db(dbName);
+  mongoTestersColl = db.collection('testers');
+  mongoAdminTestersColl = db.collection('admin_testers');
+  // Ensure unique indexes on username and email to preserve duplicate semantics
+  await mongoTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
+  await mongoTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
+  // admin_testers should follow same uniqueness constraints
+  await mongoAdminTestersColl.createIndex({ username: 1 }, { unique: true, sparse: true });
+  await mongoAdminTestersColl.createIndex({ email: 1 }, { unique: true, sparse: true });
+    console.log('Connected to MongoDB for shared testers at', MONGODB_URI);
+    return { client: mongoClient, coll: mongoTestersColl };
+  } catch (e) {
+    console.warn('MONGODB_URI set but failed to initialize MongoDB client, falling back to local testers:', e && e.message ? e.message : e);
+    mongoClient = null;
+    mongoTestersColl = null;
+    return null;
+  }
 }
 
 // If DATABASE_URL is provided use Postgres, else fallback to SQLite
@@ -68,6 +109,23 @@ if (process.env.DATABASE_URL) {
         }
         throw err;
       }
+    },
+    // create an admin-scoped tester (try Mongo admin_testers when available; fallback to regular create)
+    createAdminTester: async (username, email) => {
+      try {
+        // ensure mongo client is initialized if configured
+        await initMongoIfConfigured();
+        if (mongoAdminTestersColl) {
+          const now = new Date().toISOString();
+          const insert = { username, email: email || null, last_used: null, created_at: now };
+          const res = await mongoAdminTestersColl.insertOne(insert);
+          return { id: res.insertedId ? String(res.insertedId) : null, username, email: email || null, last_used: null, created_at: now };
+        }
+      } catch (e) {
+        // ignore and fallback
+      }
+      // fallback to normal createTester (postgres)
+      return module.exports.createTester(username, email);
     },
     listTesters: async () => all('SELECT * FROM testers ORDER BY id'),
     findTesterByUsername: async (username) => get('SELECT * FROM testers WHERE username = $1', username),
@@ -227,46 +285,282 @@ if (process.env.DATABASE_URL) {
       const db = await getDb();
       return db.all('SELECT * FROM audits ORDER BY created_at DESC');
     },
-    // tester helpers
-    createTester: async (username, email) => {
-      const db = await getDb();
+    // tester helpers (in-memory store)
+    // Note: testers are stored in-memory for this environment so created testers
+    // are available during the process lifetime and used for simple username checks.
+    // This keeps compatibility with the existing API and error semantics.
+    // In-memory store structure: { id, username, email, last_used, created_at }
+    _testersStore: (() => {
+      // persistent testers file
+      const TESTERS_FILE = path.join(DATA_DIR, 'testers.json');
+      try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* ignore */ }
+
+      // load existing testers if present
+      let arr = [];
+      let nextId = 1;
       try {
-        const res = await db.run('INSERT INTO testers(username,email) VALUES(?,?)', username, email);
-        return db.get('SELECT * FROM testers WHERE id = ?', res.lastID);
+        if (fs.existsSync(TESTERS_FILE)) {
+          const raw = fs.readFileSync(TESTERS_FILE, 'utf8');
+          const parsed = JSON.parse(raw || '[]');
+          if (Array.isArray(parsed)) {
+            arr = parsed.map((t) => ({ ...t }));
+            // compute next id
+            nextId = arr.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load testers.json, starting with empty list:', e && e.message ? e.message : e);
+        arr = [];
+        nextId = 1;
+      }
+      // persist helper: write atomically
+      const persist = (items) => {
+        try {
+          const tmp = TESTERS_FILE + '.tmp';
+          fs.writeFileSync(tmp, JSON.stringify(items, null, 2), 'utf8');
+          fs.renameSync(tmp, TESTERS_FILE);
+        } catch (e) {
+          console.warn('Failed to persist testers.json:', e && e.message ? e.message : e);
+        }
+      };
+
+      return {
+        all: () => arr.slice(),
+        findByUsername: (u) => arr.find(t => t.username === u) || null,
+        findByEmail: (e) => arr.find(t => t.email === e) || null,
+
+        create: (username, email) => {
+          if (!username) throw new Error('username required');
+          if (arr.find(t => t.username === username)) {
+            const e = new Error('duplicate');
+            e.code = 'DUPLICATE_TESTER';
+            throw e;
+          }
+          const tester = {
+            id: nextId++,
+            username,
+            email: email || null,
+            last_used: null,
+            created_at: new Date().toISOString()
+          };
+          arr.push(tester);
+          persist(arr);
+          return tester;
+        },
+        deleteById: (id) => {
+          const idx = arr.findIndex(t => Number(t.id) === Number(id));
+          if (idx === -1) return { changes: 0 };
+          arr.splice(idx, 1);
+          persist(arr);
+          return { changes: 1 };
+        },
+        updateLastUsedByUsername: (username, when) => {
+          const t = arr.find(x => x.username === username);
+          if (!t) return { changes: 0 };
+          t.last_used = when;
+          persist(arr);
+          return { changes: 1 };
+        },
+        updateLastUsedByEmailOrUsername: (emailOrUsername, when) => {
+          const t = arr.find(x => x.email === emailOrUsername || x.username === emailOrUsername);
+          if (!t) return { changes: 0 };
+          t.last_used = when;
+          persist(arr);
+          return { changes: 1 };
+        }
+      };
+    })(),
+
+    createTester: async (username, email) => {
+      // Create and return the created tester object
+      return module.exports._testersStore.create(username, email);
+    },
+    createAdminTester: async (username, email) => {
+      // try to create in Mongo admin_testers when configured; else fall back to local testers
+      try {
+        await initMongoIfConfigured();
+        if (mongoAdminTestersColl) {
+          const now = new Date().toISOString();
+          const insert = { username, email: email || null, last_used: null, created_at: now };
+          const res = await mongoAdminTestersColl.insertOne(insert);
+          return { id: res.insertedId ? String(res.insertedId) : null, username, email: email || null, last_used: null, created_at: now };
+        }
+      } catch (e) {
+        // fall through
+      }
+      return module.exports._testersStore.create(username, email);
+    },
+    listTesters: async () => {
+      return module.exports._testersStore.all();
+    },
+    findTesterByUsername: async (username) => {
+      return module.exports._testersStore.findByUsername(username);
+    },
+    findTesterByEmail: async (email) => {
+      return module.exports._testersStore.findByEmail(email);
+    },
+    deleteTester: async (id) => {
+      // if Mongo is configured, attempt to delete from Mongo collection as well
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          // Mongo expects an ObjectId or native id; we store numeric ids in sqlite, so we'll try numeric first
+          const maybeNum = Number(id);
+          if (!Number.isNaN(maybeNum)) {
+            const res = await m.coll.deleteOne({ sqlite_id: maybeNum });
+            if (res && res.deletedCount) return { changes: res.deletedCount };
+          }
+          // fallback to deleting by _id string
+          const res2 = await m.coll.deleteOne({ _id: id });
+          if (res2 && res2.deletedCount) return { changes: res2.deletedCount };
+        }
+      } catch (e) {
+        // ignore mongo delete errors and fall back to local
+      }
+      return module.exports._testersStore.deleteById(id);
+    },
+    updateTesterLastUsed: async (username, when) => {
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          const res = await m.coll.updateOne({ username }, { $set: { last_used: when } });
+          if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+        }
+      } catch (e) {}
+      return module.exports._testersStore.updateLastUsedByUsername(username, when);
+    },
+    updateTesterLastUsedByEmail: async (email, when) => {
+      try {
+        const m = await initMongoIfConfigured();
+        if (m && m.coll) {
+          const res = await m.coll.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+          if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+        }
+      } catch (e) {}
+      return module.exports._testersStore.updateLastUsedByEmailOrUsername(email, when);
+    }
+  };
+
+}
+
+// If Mongo is configured, override testers functions used in the Postgres branch
+// (when DATABASE_URL is present) too. This keeps a single shared implementation
+// for testers when MONGODB_URI is set.
+(async () => {
+  if (!MONGODB_URI) return;
+  // Initialize mongo client but do not block module load on network
+  await initMongoIfConfigured();
+  if (!mongoTestersColl) return;
+  // Helper to map mongo doc to the shape used elsewhere
+  const mapDoc = (doc) => {
+    if (!doc) return null;
+    return {
+      id: doc.sqlite_id || String(doc._id),
+      username: doc.username,
+      email: doc.email || null,
+      last_used: doc.last_used || null,
+      created_at: doc.created_at || (doc._id && doc._id.getTimestamp && doc._id.getTimestamp().toISOString()) || null
+    };
+  };
+  // Attach Mongo-backed implementations where appropriate
+  const exported = module.exports;
+  if (exported) {
+    // createTester: maintain duplicate semantics
+    exported.createTester = async (username, email) => {
+      if (!username) throw new Error('username required');
+      try {
+        const now = new Date().toISOString();
+        const insert = { username, email: email || null, last_used: null, created_at: now };
+        const res = await mongoTestersColl.insertOne(insert);
+        return mapDoc({ ...insert, _id: res.insertedId });
       } catch (err) {
-        // sqlite duplicate error code
-        if (err && err.code === 'SQLITE_CONSTRAINT') {
+        // duplicate key
+        if (err && (err.code === 11000 || (err.code && String(err.code).includes('11000')))) {
           const e = new Error('duplicate');
           e.code = 'DUPLICATE_TESTER';
           throw e;
         }
         throw err;
       }
-    },
-    listTesters: async () => {
-      const db = await getDb();
-      return db.all('SELECT * FROM testers ORDER BY id');
-    },
-    findTesterByUsername: async (username) => {
-      const db = await getDb();
-      return db.get('SELECT * FROM testers WHERE username = ?', username);
-    },
-    findTesterByEmail: async (email) => {
-      const db = await getDb();
-      return db.get('SELECT * FROM testers WHERE email = ?', email);
-    },
-    deleteTester: async (id) => {
-      const db = await getDb();
-      return db.run('DELETE FROM testers WHERE id = ?', id);
-    },
-    updateTesterLastUsed: async (username, when) => {
-      const db = await getDb();
-      return db.run('UPDATE testers SET last_used = ? WHERE username = ?', when, username);
-    },
-    updateTesterLastUsedByEmail: async (email, when) => {
-      const db = await getDb();
-      return db.run('UPDATE testers SET last_used = ? WHERE email = ? OR username = ?', when, email, email);
-    }
-  };
+    };
+    exported.listTesters = async () => {
+      // combine both regular testers and admin-created testers so admin UI shows both
+      const [docsA, docsB] = await Promise.all([
+        mongoTestersColl.find({}).toArray(),
+        mongoAdminTestersColl.find({}).toArray()
+      ]);
+      const all = docsA.concat(docsB).sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+      });
+      return all.map(mapDoc);
+    };
+    exported.findTesterByUsername = async (username) => {
+      // search admin_testers first, then testers
+      const doc = await mongoAdminTestersColl.findOne({ username }) || await mongoTestersColl.findOne({ username });
+      return mapDoc(doc);
+    };
+    exported.findTesterByEmail = async (email) => {
+      const doc = await mongoAdminTestersColl.findOne({ email }) || await mongoTestersColl.findOne({ email });
+      return mapDoc(doc);
+    };
+    exported.deleteTester = async (id) => {
+      // try numeric sqlite_id first across both collections
+      const maybeNum = Number(id);
+      if (!Number.isNaN(maybeNum)) {
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ sqlite_id: maybeNum }),
+          mongoAdminTestersColl.deleteOne({ sqlite_id: maybeNum })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
+      }
+      // try _id in both collections
+      try {
+        const { ObjectId } = require('mongodb');
+        const oid = ObjectId.isValid(id) ? new ObjectId(id) : id;
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ _id: oid }),
+          mongoAdminTestersColl.deleteOne({ _id: oid })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
+      } catch (e) {
+        const [r1, r2] = await Promise.all([
+          mongoTestersColl.deleteOne({ _id: id }),
+          mongoAdminTestersColl.deleteOne({ _id: id })
+        ]);
+        return { changes: (r1.deletedCount || 0) + (r2.deletedCount || 0) };
+      }
+    };
+    exported.updateTesterLastUsed = async (username, when) => {
+      const res = await mongoAdminTestersColl.updateOne({ username }, { $set: { last_used: when } });
+      if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+      const res2 = await mongoTestersColl.updateOne({ username }, { $set: { last_used: when } });
+      return { changes: res2.modifiedCount || res2.matchedCount };
+    };
+    exported.updateTesterLastUsedByEmail = async (email, when) => {
+      const res = await mongoAdminTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+      if (res && res.matchedCount) return { changes: res.modifiedCount || res.matchedCount };
+      const res2 = await mongoTestersColl.updateOne({ $or: [{ email }, { username: email }] }, { $set: { last_used: when } });
+      return { changes: res2.modifiedCount || res2.matchedCount };
+    };
 
-}
+    // allow creating testers specifically as admin-created entries
+    exported.createAdminTester = async (username, email) => {
+      if (!username) throw new Error('username required');
+      try {
+        const now = new Date().toISOString();
+        const insert = { username, email: email || null, last_used: null, created_at: now };
+        const res = await mongoAdminTestersColl.insertOne(insert);
+        return mapDoc({ ...insert, _id: res.insertedId });
+      } catch (err) {
+        if (err && (err.code === 11000 || (err.code && String(err.code).includes('11000')))) {
+          const e = new Error('duplicate');
+          e.code = 'DUPLICATE_TESTER';
+          throw e;
+        }
+        throw err;
+      }
+    };
+  }
+})();

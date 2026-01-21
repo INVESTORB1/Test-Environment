@@ -9,6 +9,7 @@ services:
     ports:
       - "6379:6379"
 
+
   app:
     build: .
     command: npm start
@@ -20,6 +21,8 @@ services:
       - DATA_DIR=/data
     volumes:
       - ./:/usr/src/app
+      # keep container's node_modules (avoid host mount hiding installed modules)
+      - /usr/src/app/node_modules
       - app-data:/data
     depends_on:
       - redis
@@ -27,3 +30,4 @@ services:
 volumes:
   redis-data:
   app-data:
+  

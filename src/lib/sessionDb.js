@@ -3,15 +3,32 @@ const { open } = require('sqlite');
 const path = require('path');
 const fs = require('fs');
 
-const SESSIONS_DIR = path.join(__dirname, '..', 'data', 'sessions');
-if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+// Allow overriding where session DB files are stored. On some hosts (eg. Render)
+// writing inside the project root can be read-only. Use a configurable
+// directory and fall back to the OS temp directory if creation fails.
+const DEFAULT_SESSIONS_DIR = path.join(__dirname, '..', 'data', 'sessions');
+let ACTUAL_SESSIONS_DIR = process.env.SESSION_DB_DIR || DEFAULT_SESSIONS_DIR;
+try {
+  if (!fs.existsSync(ACTUAL_SESSIONS_DIR)) fs.mkdirSync(ACTUAL_SESSIONS_DIR, { recursive: true });
+} catch (e) {
+  // fallback to OS temp dir
+  try {
+    const os = require('os');
+    ACTUAL_SESSIONS_DIR = path.join(os.tmpdir(), 'test-environment-sessions');
+    if (!fs.existsSync(ACTUAL_SESSIONS_DIR)) fs.mkdirSync(ACTUAL_SESSIONS_DIR, { recursive: true });
+    console.warn(`Could not create session dir '${process.env.SESSION_DB_DIR || DEFAULT_SESSIONS_DIR}', falling back to tmp dir '${ACTUAL_SESSIONS_DIR}': ${e && e.message}`);
+  } catch (e2) {
+    // if even tmp dir creation fails, rethrow to surface the original problem
+    throw e;
+  }
+}
 
 const cache = new Map();
 
 async function getSessionDb(sessionId) {
   if (!sessionId) throw new Error('sessionId required');
   if (cache.has(sessionId)) return cache.get(sessionId);
-  const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
+  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
   const dbPromise = open({ filename: file, driver: sqlite3.Database });
   const db = await dbPromise;
   // initialize schema for bank
@@ -21,6 +38,7 @@ async function getSessionDb(sessionId) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       owner_name TEXT,
       account_number TEXT UNIQUE,
+      status TEXT DEFAULT 'active',
       balance_cents INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -43,6 +61,10 @@ async function getSessionDb(sessionId) {
     if (!accColNames.includes('account_number')) {
       await db.exec('ALTER TABLE accounts ADD COLUMN account_number TEXT');
     }
+    // ensure older DBs have a status column with a sensible default
+    if (!accColNames.includes('status')) {
+      await db.exec("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'");
+    }
     const txCols = await db.all("PRAGMA table_info(transactions)");
     const txColNames = txCols.map(c => c.name);
     if (!txColNames.includes('from_account_number')) {
@@ -51,8 +73,10 @@ async function getSessionDb(sessionId) {
     if (!txColNames.includes('to_account_number')) {
       await db.exec('ALTER TABLE transactions ADD COLUMN to_account_number TEXT');
     }
-    // populate account_number for existing accounts if missing (use id-based fallback)
-    await db.run(`UPDATE accounts SET account_number = (10000000 + id) WHERE account_number IS NULL OR account_number = ''`);
+  // populate account_number for existing accounts if missing (use id-based fallback)
+  await db.run(`UPDATE accounts SET account_number = (10000000 + id) WHERE account_number IS NULL OR account_number = ''`);
+  // ensure status has a sensible default for older DBs
+  await db.run(`UPDATE accounts SET status = 'active' WHERE status IS NULL OR status = ''`);
     // populate transaction account numbers from accounts table where missing
     await db.run(`UPDATE transactions SET from_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.from_account) WHERE from_account_number IS NULL OR from_account_number = ''`);
     await db.run(`UPDATE transactions SET to_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.to_account) WHERE to_account_number IS NULL OR to_account_number = ''`);
@@ -68,7 +92,7 @@ async function deleteSessionDb(sessionId) {
   if (!sessionId) throw new Error('sessionId required');
   if (!cache.has(sessionId)) {
     // try deleting file anyway
-    const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
+  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
     if (fs.existsSync(file)) fs.unlinkSync(file);
     return;
   }
@@ -77,7 +101,7 @@ async function deleteSessionDb(sessionId) {
     await db.close();
   } catch (e) {}
   cache.delete(sessionId);
-  const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
+  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 

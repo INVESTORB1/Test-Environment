@@ -1,11 +1,14 @@
 const sessionDb = require('./sessionDb');
 
+// canonical allowed statuses
+const ALLOWED_STATUSES = ['active', 'dormant', 'debit freeze', 'credit freeze', 'total freeze', 'inactive'];
+
 async function listAccounts(sessionId) {
   const db = await sessionDb.getSessionDb(sessionId);
   return db.all('SELECT * FROM accounts ORDER BY id');
 }
 
-async function createAccount(sessionId, ownerName, initialCents) {
+async function createAccount(sessionId, ownerName, initialCents, status = 'active') {
   const db = await sessionDb.getSessionDb(sessionId);
   // generate a short unique account number (8 digits) and ensure uniqueness
   function genAcc() {
@@ -13,9 +16,12 @@ async function createAccount(sessionId, ownerName, initialCents) {
   }
   let accNum = genAcc();
   // try a few times to avoid collision
+  // normalize and validate status
+  status = (status || 'active').toString().toLowerCase();
+  if (!ALLOWED_STATUSES.includes(status)) throw new Error(`Invalid status '${status}'. Allowed: ${ALLOWED_STATUSES.join(', ')}`);
   for (let i = 0; i < 5; i++) {
     try {
-      const res = await db.run('INSERT INTO accounts(owner_name,account_number,balance_cents) VALUES(?,?,?)', ownerName, accNum, initialCents);
+      const res = await db.run('INSERT INTO accounts(owner_name,account_number,status,balance_cents) VALUES(?,?,?,?)', ownerName, accNum, status, initialCents);
       return db.get('SELECT * FROM accounts WHERE id = ?', res.lastID);
     } catch (e) {
       // unique constraint failed, try again
@@ -44,11 +50,21 @@ async function transfer(sessionId, fromId, toId, amountCents, note) {
   const db = await sessionDb.getSessionDb(sessionId);
   // run in transaction
   return db.exec('BEGIN TRANSACTION').then(async () => {
+    // declare here so the catch block can reference them when mapping error messages
+    let from = null;
+    let to = null;
     try {
-      const from = await db.get('SELECT * FROM accounts WHERE id = ?', fromId);
-      const to = await db.get('SELECT * FROM accounts WHERE id = ?', toId);
+      from = await db.get('SELECT * FROM accounts WHERE id = ?', fromId);
+      to = await db.get('SELECT * FROM accounts WHERE id = ?', toId);
       if (!from || !to) throw new Error('Account not found');
       if (amountCents <= 0) throw new Error('Amount must be positive');
+      // enforce status rules
+      const sFrom = (from.status || 'active').toLowerCase();
+      const sTo = (to.status || 'active').toLowerCase();
+      const allowDebit = (s) => (s === 'active' || s === 'credit freeze');
+      const allowCredit = (s) => (s === 'active' || s === 'debit freeze');
+      if (!allowDebit(sFrom)) throw new Error(`Account ${fromId} cannot be debited due to status (${from.status})`);
+      if (!allowCredit(sTo)) throw new Error(`Account ${toId} cannot be credited due to status (${to.status})`);
       if (from.balance_cents < amountCents) throw new Error('Insufficient funds');
       await db.run('UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ?', amountCents, fromId);
       await db.run('UPDATE accounts SET balance_cents = balance_cents + ? WHERE id = ?', amountCents, toId);
@@ -59,10 +75,52 @@ async function transfer(sessionId, fromId, toId, amountCents, note) {
       return res;
     } catch (err) {
       await db.exec('ROLLBACK').catch(() => {});
-      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from ? from.account_number : null, to ? to.account_number : null, amountCents, 'failed', String(err));
+      // Create concise, user-friendly failure messages for business errors
+      let failureNote = String(err);
+      try {
+        const msg = err && err.message ? err.message.toString() : '';
+        if (msg.includes('cannot be debited')) {
+          const st = from && from.status ? from.status : 'unknown';
+          if (st === 'debit freeze') {
+            failureNote = `Account ${fromId} is on debit freeze and cannot be debited.`;
+          } else if (st === 'credit freeze') {
+            // unlikely: credit_freeze allows debit, but handle defensively
+            failureNote = `Account ${fromId} is on credit freeze and cannot be debited.`;
+          } else {
+            failureNote = `Account ${fromId} is currently '${st}' and cannot be debited.`;
+          }
+        } else if (msg.includes('cannot be credited')) {
+          const st = to && to.status ? to.status : 'unknown';
+          if (st === 'credit freeze') {
+            failureNote = `Account ${toId} is on credit freeze and cannot be credited.`;
+          } else if (st === 'debit freeze') {
+            // unlikely: debit_freeze allows credit, but handle defensively
+            failureNote = `Account ${toId} is on debit freeze and cannot be credited.`;
+          } else {
+            failureNote = `Account ${toId} is currently '${st}' and cannot be credited.`;
+          }
+        } else if (msg.toLowerCase().includes('insufficient funds')) {
+          failureNote = 'Insufficient funds';
+        } else if (msg.toLowerCase().includes('account not found')) {
+          failureNote = 'One or more accounts not found';
+        }
+      } catch (e) {
+        // fallback to the original error if mapping fails
+        failureNote = String(err);
+      }
+
+      await db.run('INSERT INTO transactions(from_account,to_account,from_account_number,to_account_number,amount_cents,status,note) VALUES(?,?,?,?,?,?,?)', fromId, toId, from ? from.account_number : null, to ? to.account_number : null, amountCents, 'failed', failureNote);
       return db.get('SELECT * FROM transactions WHERE id = last_insert_rowid()');
     }
   });
 }
 
-module.exports = { listAccounts, createAccount, transfer, listTransactions };
+async function updateAccountStatus(sessionId, accountId, newStatus) {
+  const db = await sessionDb.getSessionDb(sessionId);
+  newStatus = (newStatus || '').toString().toLowerCase();
+  if (!ALLOWED_STATUSES.includes(newStatus)) throw new Error(`Invalid status '${newStatus}'. Allowed: ${ALLOWED_STATUSES.join(', ')}`);
+  await db.run('UPDATE accounts SET status = ? WHERE id = ?', newStatus, accountId);
+  return db.get('SELECT * FROM accounts WHERE id = ?', accountId);
+}
+
+module.exports = { listAccounts, createAccount, transfer, listTransactions, updateAccountStatus };

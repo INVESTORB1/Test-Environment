@@ -19,6 +19,7 @@
         <form id="createAccountForm" method="post" action="/bank/accounts">
           <label>Owner name: <input id="ownerInput" name="owner" type="text" required pattern="[A-Za-z '\-]+" inputmode="text" maxlength="80" title="Letters, spaces, hyphen and apostrophe only"></label>
           <label>Initial balance (Naira): <input id="balanceInput" name="balance" value="1000" required inputmode="numeric"></label>
+          <!-- Initial status removed: new accounts default to 'active' on the server -->
           <button type="submit" class="btn btn-primary">Create</button>
         </form>
 
@@ -31,6 +32,7 @@
                 <th>Owner</th>
                 <th>Account #</th>
                 <th class="right">Balance</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody id="accountsTbody">
@@ -40,6 +42,18 @@
                 <td><%= a.owner_name %></td>
                 <td class="mono"> <%= a.account_number || ('#' + a.id) %> </td>
                 <td class="right"><%= formatCurrency(a.balance_cents) %></td>
+                <td>
+                  <select class="status-select" data-account-id="<%= a.id %>">
+                    <% const cur = (a.status || 'active'); %>
+                    <option value="active" <%= cur==='active' ? 'selected' : '' %>>active</option>
+                    <option value="dormant" <%= cur==='dormant' ? 'selected' : '' %>>dormant</option>
+                    <option value="debit freeze" <%= cur==='debit freeze' ? 'selected' : '' %>>debit freeze</option>
+                    <option value="credit freeze" <%= cur==='credit freeze' ? 'selected' : '' %>>credit freeze</option>
+                    <option value="total freeze" <%= cur==='total freeze' ? 'selected' : '' %>>total freeze</option>
+                    <option value="inactive" <%= cur==='inactive' ? 'selected' : '' %>>inactive</option>
+                  </select>
+                  <span class="status-badge" style="display:inline-block;margin-left:8px;padding:4px 8px;border-radius:12px;font-size:0.85em;background:#d4edda"><%= a.status || 'active' %></span>
+                </td>
               </tr>
             <% }) %>
             </tbody>

@@ -48,7 +48,7 @@
         <tbody>
           <% labs.forEach((l, idx) => { %>
             <tr>
-              <td class="lab-number"><span class="badge-number"><%= idx + 1 %></span></td>
+              <td class="lab-number"><span class="badge-number"><%= l.id %></span></td>
               <td><strong class="lab-title"><%= l.title %></strong></td>
               <td class="muted"><%= l.description %></td>
               <td class="labs-actions"><a class="btn btn-primary" href="/labs/<%= l.id %>" aria-label="View details for <%= l.title %>">View details</a></td>

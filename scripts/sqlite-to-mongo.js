@@ -19,8 +19,7 @@ if (!fs.existsSync(DB_PATH)) {
 
 async function migrate() {
   const sqlite = new sqlite3.Database(DB_PATH);
-  // mongodb v4+ : avoid passing legacy parser/topology options
-  const client = new MongoClient(MONGODB_URI);
+  const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
   await client.connect();
   const db = client.db();
 

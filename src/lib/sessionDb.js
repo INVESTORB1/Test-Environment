@@ -21,7 +21,6 @@ async function getSessionDb(sessionId) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       owner_name TEXT,
       account_number TEXT UNIQUE,
-      status TEXT DEFAULT 'active',
       balance_cents INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -44,9 +43,6 @@ async function getSessionDb(sessionId) {
     if (!accColNames.includes('account_number')) {
       await db.exec('ALTER TABLE accounts ADD COLUMN account_number TEXT');
     }
-      if (!accColNames.includes('status')) {
-        await db.exec("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'");
-      }
     const txCols = await db.all("PRAGMA table_info(transactions)");
     const txColNames = txCols.map(c => c.name);
     if (!txColNames.includes('from_account_number')) {
@@ -57,8 +53,6 @@ async function getSessionDb(sessionId) {
     }
     // populate account_number for existing accounts if missing (use id-based fallback)
     await db.run(`UPDATE accounts SET account_number = (10000000 + id) WHERE account_number IS NULL OR account_number = ''`);
-  // ensure status has a sensible default for older DBs
-  await db.run(`UPDATE accounts SET status = 'active' WHERE status IS NULL OR status = ''`);
     // populate transaction account numbers from accounts table where missing
     await db.run(`UPDATE transactions SET from_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.from_account) WHERE from_account_number IS NULL OR from_account_number = ''`);
     await db.run(`UPDATE transactions SET to_account_number = (SELECT account_number FROM accounts WHERE accounts.id = transactions.to_account) WHERE to_account_number IS NULL OR to_account_number = ''`);

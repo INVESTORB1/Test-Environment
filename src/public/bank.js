@@ -286,53 +286,6 @@
     });
   }
 
-// helper to map status to a light background color for the badge
-function _statusColor(status) {
-  const s = (status || '').toLowerCase();
-  if (s === 'active') return '#d4edda';
-  if (s === 'debit freeze' || s === 'credit freeze') return '#fff3cd';
-  if (s === 'total freeze') return '#f8d7da';
-  if (s === 'dormant' || s === 'inactive') return '#e2e3e5';
-  return '#e9ecef';
-}
-
-// attach event handlers to status dropdowns to send AJAX updates
-function _bindStatusControls() {
-  const selects = Array.from(document.querySelectorAll('.status-select'));
-  selects.forEach(sel => {
-    sel.addEventListener('change', async (ev) => {
-      const accountId = sel.dataset.accountId;
-      const newStatus = sel.value;
-      try {
-        const res = await fetch(`/bank/accounts/${accountId}/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus })
-        });
-        if (!res.ok) throw new Error('Update failed');
-        const json = await res.json();
-        // update adjacent badge text and color
-        const badge = sel.parentElement.querySelector('.status-badge');
-        if (badge) {
-          badge.textContent = newStatus;
-          badge.style.background = _statusColor(newStatus);
-        }
-      } catch (e) {
-        showToast && showToast('Failed to update status', 'error');
-        // revert selection visually? (reload page to be safe)
-        setTimeout(() => window.location.reload(), 800);
-      }
-    });
-    // initial color
-    const badge = sel.parentElement.querySelector('.status-badge');
-    if (badge) badge.style.background = _statusColor(sel.value || badge.textContent);
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  _bindStatusControls();
-});
-
   function showToast(message, type) {
     if (!toast) return alert(message);
     toast.textContent = message;

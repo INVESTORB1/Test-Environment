@@ -28,18 +28,10 @@ async function main() {
     process.exit(1);
   }
 
-  const client = new MongoClient(MONGODB_URI);
+  const client = new MongoClient(MONGODB_URI, {});
   try {
     await client.connect();
-    const dbName = process.env.MONGODB_DB || (function () {
-      try {
-        const u = new URL(MONGODB_URI);
-        return u.pathname ? u.pathname.replace(/^\//, '') : 'test';
-      } catch (e) {
-        const m = String(MONGODB_URI).match(/\/([^/?]+)(?:[?]|$)/);
-        return (m && m[1]) ? m[1] : 'test';
-      }
-    })();
+    const dbName = process.env.MONGODB_DB || (new URL(MONGODB_URI)).pathname.replace(/^\//, '') || 'test';
     const db = client.db(dbName);
 
     async function insertTester(username, email) {

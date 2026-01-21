@@ -26,8 +26,6 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(bodyParser.urlencoded({ extended: false }));
-// allow JSON bodies for AJAX status updates
-app.use(express.json());
 
 // Session configuration: prefer Redis when REDIS_URL is provided, else use SQLite store.
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
@@ -143,23 +141,6 @@ const LAB_CATALOG = [
       'The UI blocks transfers from an account to itself; choose distinct accounts.',
       'If a magic link was emailed, check spam; otherwise use the on-screen link.',
       'Draft your test cases before commencing.'
-    ]
-  }
-  ,
-  {
-    id: 2,
-    title: 'Loan Application',
-    description: 'quick loan',
-    problem: 'Apply for a small quick loan, validate eligibility, and observe approval or rejection flows in a sandboxed environment.',
-    steps: [
-      'Open the Loan Application lab and review the eligibility criteria.',
-      'Fill and submit a loan application with necessary details.',
-      'Observe the approval/rejection outcome and any changes to account balances.',
-      'Reset the sandbox to try different scenarios.'
-    ],
-    hints: [
-      'Use realistic but small amounts for quick approvals.',
-      'If you simulate a poor credit profile, expect rejection.'
     ]
   }
 ];
@@ -382,81 +363,6 @@ app.get('/labs', requireAuth, async (req, res) => {
   res.render('labs', { labs: labsWithStats, user: req.session.user });
 });
 
-// Loan Application lab - simple interactive sandbox
-app.get('/labs/2', requireAuth, async (req, res) => {
-  // optional query params for banner
-  const status = req.query.status || null;
-  const msg = req.query.msg || null;
-  // display the loan application form
-  return res.render('lab-loan', { status, msg, userDisplay: res.locals.userDisplayName });
-});
-
-app.post('/labs/2/apply', requireAuth, async (req, res) => {
-  const name = (req.body.name || '').toString().trim();
-  const amount = Math.round(parseFloat(req.body.amount || '0') * 100);
-  const income = Math.round(parseFloat(req.body.income || '0') * 100);
-  const term = Number(req.body.term || 0);
-  if (!name || amount <= 0 || income <= 0 || term <= 0) {
-    return res.redirect(`/labs/2?status=failed&msg=${encodeURIComponent('Please provide valid application data')}`);
-  }
-  try {
-    // prepare session DB table for loan applications (keeps loans separate from bank sandbox)
-    const dbSession = await sessionDb.getSessionDb(req.sessionID);
-    await dbSession.exec(`
-      CREATE TABLE IF NOT EXISTS loan_applications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        amount_cents INTEGER,
-        income_cents INTEGER,
-        term_months INTEGER,
-        status TEXT,
-        note TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    // Basic quick-loan eligibility rules (sandbox):
-    // - max loan amount: ₦100,000
-    // - require monthly income >= 1/3 of requested amount
-    const MAX_LOAN = 100000 * 100; // in cents
-    if (amount > MAX_LOAN) {
-      await dbSession.run('INSERT INTO loan_applications(name,amount_cents,income_cents,term_months,status,note) VALUES(?,?,?,?,?,?)', name, amount, income, term, 'rejected', 'exceeds max quick-loan amount');
-      await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'loan_application', `name=${name} amount=${amount} result=rejected_max`);
-      return res.redirect(`/labs/2?status=failed&msg=${encodeURIComponent('Loan exceeds quick-loan maximum (₦100,000)')}`);
-    }
-    if (income * 1 < Math.ceil(amount / 3)) {
-      await dbSession.run('INSERT INTO loan_applications(name,amount_cents,income_cents,term_months,status,note) VALUES(?,?,?,?,?,?)', name, amount, income, term, 'rejected', 'insufficient income');
-      await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'loan_application', `name=${name} amount=${amount} result=rejected_income`);
-      return res.redirect(`/labs/2?status=failed&msg=${encodeURIComponent('Loan rejected: insufficient income')}`);
-    }
-    // approved: record the loan application in the loan_applications table (separate from bank sandbox)
-    await dbSession.run('INSERT INTO loan_applications(name,amount_cents,income_cents,term_months,status,note) VALUES(?,?,?,?,?,?)', name, amount, income, term, 'approved', 'Quick loan approved (not credited to bank sandbox accounts)');
-    await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'loan_application', `name=${name} amount=${amount} result=approved`);
-    return res.redirect(`/labs/2?status=success&msg=${encodeURIComponent('Loan approved (recorded separately)')}`);
-  } catch (err) {
-    console.error('Loan application error:', err && err.stack ? err.stack : String(err));
-    try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'loan_application', `name=${name} amount=${amount} result=error err=${String(err)}`); } catch (e) {}
-      try {
-        const sdb = await sessionDb.getSessionDb(req.sessionID);
-        await sdb.exec(`
-          CREATE TABLE IF NOT EXISTS loan_applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            amount_cents INTEGER,
-            income_cents INTEGER,
-            term_months INTEGER,
-            status TEXT,
-            note TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          );
-        `);
-        await sdb.run('INSERT INTO loan_applications(name,amount_cents,income_cents,term_months,status,note) VALUES(?,?,?,?,?,?)', name, amount, income, term, 'error', String(err));
-      } catch (e) {
-        // ignore recording errors
-      }
-      return res.redirect(`/labs/2?status=failed&msg=${encodeURIComponent('Internal error processing loan application')}`);
-  }
-});
-
 // Bank sandbox routes
 app.get('/bank', requireAuth, async (req, res) => {
   // initialize session from templates if empty
@@ -476,34 +382,10 @@ app.get('/bank', requireAuth, async (req, res) => {
 app.post('/bank/accounts', requireAuth, async (req, res) => {
   const owner = req.body.owner;
   const balance = Math.round(parseFloat(req.body.balance || '0') * 100);
-  const statusRaw = (req.body.status || 'active').toString().toLowerCase();
-  const allowed = ['active', 'dormant', 'debit freeze', 'credit freeze', 'total freeze', 'inactive'];
-  if (!allowed.includes(statusRaw)) {
-    return res.redirect(`/bank?status=failed&msg=${encodeURIComponent('Invalid status. Allowed: ' + allowed.join(', '))}`);
-  }
-  try {
-    await bank.createAccount(req.sessionID, owner, balance, statusRaw);
-  } catch (e) {
-    return res.redirect(`/bank?status=failed&msg=${encodeURIComponent(String(e))}`);
-  }
+  await bank.createAccount(req.sessionID, owner, balance);
   // log audit at app-level
   try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'create_account', `owner=${owner} balance=${balance}`); } catch (e) {}
   res.redirect('/bank');
-});
-
-// AJAX endpoint to update an individual account status in the session DB
-app.post('/bank/accounts/:id/status', requireAuth, async (req, res) => {
-  const id = req.params.id;
-  const status = (req.body && req.body.status) ? req.body.status.toString().toLowerCase() : null;
-  const allowed = ['active', 'dormant', 'debit freeze', 'credit freeze', 'total freeze', 'inactive'];
-  if (!status) return res.status(400).json({ error: 'Missing status' });
-  if (!allowed.includes(status)) return res.status(400).json({ error: `Invalid status. Allowed: ${allowed.join(', ')}` });
-  try {
-    const acc = await bank.updateAccountStatus(req.sessionID, id, status);
-    return res.json({ ok: true, account: acc });
-  } catch (e) {
-    return res.status(500).json({ error: String(e) });
-  }
 });
 
 app.post('/bank/transfer', requireAuth, async (req, res) => {
@@ -521,34 +403,19 @@ app.post('/bank/transfer', requireAuth, async (req, res) => {
   // prefer explicit cents field from client-side helper when available
   const amount = req.body.amount_cents ? Number(req.body.amount_cents) : Math.round(parseFloat(req.body.amount || '0') * 100);
   const note = req.body.note;
-  try {
-    const tx = await bank.transfer(req.sessionID, from, to, amount, note);
-    const status = tx && tx.status ? tx.status : 'failed';
-    // show a clear, user-friendly message on success/failure rather than the raw tx note
-    let msg = '';
-    if (status === 'success') {
-      msg = 'Transaction completed successfully';
-    } else if (tx && tx.error) {
-      msg = tx.error;
-    } else if (tx && tx.note) {
-      // fallback to note only for additional context when not success
-      msg = tx.note;
-    } else {
-      msg = 'Transaction failed';
-    }
-    return res.redirect(`/bank?status=${encodeURIComponent(status)}&msg=${encodeURIComponent(msg)}`);
-  } catch (err) {
-    // Unexpected error: log and show a helpful message instead of letting the process crash.
-    console.error('Unexpected error during transfer:', err && err.stack ? err.stack : String(err));
-    try { await db.logAudit(req.session.user ? req.session.user.email : 'unknown', 'transfer_error', `err=${String(err)}`); } catch (e) {}
-    // If this looks like a business error (insufficient funds, account not found, status block), surface it to the user.
-    const emsg = err && err.message ? err.message : String(err);
-    const lowered = String(emsg).toLowerCase();
-    if (lowered.includes('insufficient') || lowered.includes('cannot be') || lowered.includes('account not found')) {
-      return res.redirect(`/bank?status=failed&msg=${encodeURIComponent(emsg)}`);
-    }
-    return res.redirect(`/bank?status=failed&msg=${encodeURIComponent('Internal server error during transfer')}`);
+  const tx = await bank.transfer(req.sessionID, from, to, amount, note);
+  const status = tx.status || 'failed';
+  // show a clear, user-friendly message on success/failure rather than the raw tx note
+  let msg = '';
+  if (status === 'success') {
+    msg = 'Transaction completed successfully';
+  } else if (tx.error) {
+    msg = tx.error;
+  } else if (tx.note) {
+    // fallback to note only for additional context when not success
+    msg = tx.note;
   }
+  return res.redirect(`/bank?status=${encodeURIComponent(status)}&msg=${encodeURIComponent(msg)}`);
 });
 
 app.post('/bank/reset', requireAuth, async (req, res) => {
@@ -631,36 +498,6 @@ app.get('/labs/:id', requireAuth, (req, res) => {
 
 app.get('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/tester-login'));
-});
-
-// global express error handler (last middleware)
-app.use(async (err, req, res, next) => {
-  console.error('Unhandled Express error:', err && err.stack ? err.stack : String(err));
-  // If the request expects JSON, return JSON error
-  if (req.accepts('json') && !req.accepts('html')) {
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-  // For bank routes try to render the bank page with current accounts and a friendly banner
-  if (req.path && req.path.startsWith('/bank')) {
-    try {
-      const accounts = req.sessionID ? await bank.listAccounts(req.sessionID) : [];
-      return res.status(500).render('bank', { accounts, status: 'failed', msg: 'Internal server error' });
-    } catch (e) {
-      console.error('Failed to load accounts for error page:', e && e.stack ? e.stack : String(e));
-      return res.status(500).render('bank', { accounts: [], status: 'failed', msg: 'Internal server error' });
-    }
-  }
-  res.status(500).send('Internal server error');
-});
-
-// process-level handlers to avoid the node process exiting silently on unexpected errors.
-// We log and keep the process alive so the app remains reachable; in production you may prefer to
-// crash and let a process manager restart the service.
-process.on('uncaughtException', (err) => {
-  console.error('uncaughtException:', err && err.stack ? err.stack : String(err));
-});
-process.on('unhandledRejection', (reason, p) => {
-  console.error('unhandledRejection at:', p, 'reason:', reason && reason.stack ? reason.stack : String(reason));
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

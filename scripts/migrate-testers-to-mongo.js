@@ -20,17 +20,9 @@ async function main() {
   const rows = await db.all('SELECT id, username, email, last_used, created_at FROM testers');
   console.log(`Found ${rows.length} testers in sqlite at ${DB_PATH}`);
 
-  const client = new MongoClient(MONGODB_URI);
+  const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
   await client.connect();
-  const dbName = process.env.MONGODB_DB || (function () {
-    try {
-      const u = new URL(MONGODB_URI);
-      return u.pathname ? u.pathname.replace(/^\//, '') : 'test';
-    } catch (e) {
-      const m = String(MONGODB_URI).match(/\/([^/?]+)(?:[?]|$)/);
-      return (m && m[1]) ? m[1] : 'test';
-    }
-  })();
+  const dbName = process.env.MONGODB_DB || (new URL(MONGODB_URI)).pathname.replace(/^\//, '') || 'test';
   const mdb = client.db(dbName);
   const coll = mdb.collection('testers');
   await coll.createIndex({ username: 1 }, { unique: true, sparse: true });

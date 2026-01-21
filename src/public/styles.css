@@ -169,6 +169,22 @@ th, td { padding:10px; border-bottom:1px solid #eef3f8 }
 .accounts-table td, .tx-table td { vertical-align: middle }
 .account-select { max-width: 100%; }
 
+/* Status select and badge: keep them inline and aligned */
+.accounts-table td .status-select {
+	display: inline-block;
+	width: auto; /* don't force full-width */
+	min-width: 180px; /* reasonable default so long labels fit */
+	max-width: 40%;
+	vertical-align: middle;
+	padding: 10px; border:1px solid #e1e8f0; border-radius:8px; background:#fbfdff;
+}
+.accounts-table td .status-badge {
+	display: inline-block;
+	vertical-align: middle;
+	margin-left: 10px;
+	padding: 6px 10px; border-radius:999px; font-weight:700; font-size:0.85rem; background:#e6f4ea; color:#1b6f3a;
+}
+
 .pager { display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px }
 .pager .muted { font-weight:600 }
 .pager button[disabled] { opacity:0.5; cursor:default }

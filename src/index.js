@@ -36,33 +36,17 @@ let sessionStore = null;
 // else prefer Redis when REDIS_URL is provided, else use SQLite store.
 if (process.env.MONGODB_URI) {
   try {
-    // Support both connect-mongo v4+ (exports.create) and older v3 (factory that takes session)
-    const maybe = require('connect-mongo');
-    if (maybe && typeof maybe.create === 'function') {
-      // v4+: use create factory
-      sessionStore = maybe.create({
-        mongoUrl: process.env.MONGODB_URI,
-        mongoOptions: { useNewUrlParser: true, useUnifiedTopology: true },
-        collectionName: 'sessions'
-      });
-    } else if (typeof maybe === 'function') {
-      // v3 style: require('connect-mongo')(session) returns a Store constructor
-      try {
-        const MongoStore = maybe(session);
-        // older API expects 'url' option
-        sessionStore = new MongoStore({ url: process.env.MONGODB_URI, collection: 'sessions' });
-      } catch (e2) {
-        throw e2;
-      }
-    } else {
-      throw new Error('connect-mongo: unexpected export shape: ' + String(Object.keys(maybe || {})));
-    }
+    // connect-mongo v4+ exposes a create() factory
+    const MongoStore = require('connect-mongo');
+    sessionStore = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      mongoOptions: { useNewUrlParser: true, useUnifiedTopology: true },
+      collectionName: 'sessions'
+    });
     console.log('Using MongoDB session store');
   } catch (e) {
     // don't crash if module isn't installed or fails to initialize; fall through to other stores
     console.warn('MONGODB_URI set but failed to initialize connect-mongo; falling back to other session stores', e && e.message);
-    // For diagnostics, also print the stack at debug level
-    if (process.env.DEBUG) console.warn(e && e.stack);
   }
 }
 // prefer Redis when REDIS_URL is provided, else use SQLite store.

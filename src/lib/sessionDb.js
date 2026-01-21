@@ -3,32 +3,15 @@ const { open } = require('sqlite');
 const path = require('path');
 const fs = require('fs');
 
-// Allow overriding where session DB files are stored. On some hosts (eg. Render)
-// writing inside the project root can be read-only. Use a configurable
-// directory and fall back to the OS temp directory if creation fails.
-const DEFAULT_SESSIONS_DIR = path.join(__dirname, '..', 'data', 'sessions');
-let ACTUAL_SESSIONS_DIR = process.env.SESSION_DB_DIR || DEFAULT_SESSIONS_DIR;
-try {
-  if (!fs.existsSync(ACTUAL_SESSIONS_DIR)) fs.mkdirSync(ACTUAL_SESSIONS_DIR, { recursive: true });
-} catch (e) {
-  // fallback to OS temp dir
-  try {
-    const os = require('os');
-    ACTUAL_SESSIONS_DIR = path.join(os.tmpdir(), 'test-environment-sessions');
-    if (!fs.existsSync(ACTUAL_SESSIONS_DIR)) fs.mkdirSync(ACTUAL_SESSIONS_DIR, { recursive: true });
-    console.warn(`Could not create session dir '${process.env.SESSION_DB_DIR || DEFAULT_SESSIONS_DIR}', falling back to tmp dir '${ACTUAL_SESSIONS_DIR}': ${e && e.message}`);
-  } catch (e2) {
-    // if even tmp dir creation fails, rethrow to surface the original problem
-    throw e;
-  }
-}
+const SESSIONS_DIR = path.join(__dirname, '..', 'data', 'sessions');
+if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
 const cache = new Map();
 
 async function getSessionDb(sessionId) {
   if (!sessionId) throw new Error('sessionId required');
   if (cache.has(sessionId)) return cache.get(sessionId);
-  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
+  const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
   const dbPromise = open({ filename: file, driver: sqlite3.Database });
   const db = await dbPromise;
   // initialize schema for bank
@@ -91,7 +74,7 @@ async function deleteSessionDb(sessionId) {
   if (!sessionId) throw new Error('sessionId required');
   if (!cache.has(sessionId)) {
     // try deleting file anyway
-  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
+    const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
     if (fs.existsSync(file)) fs.unlinkSync(file);
     return;
   }
@@ -100,7 +83,7 @@ async function deleteSessionDb(sessionId) {
     await db.close();
   } catch (e) {}
   cache.delete(sessionId);
-  const file = path.join(ACTUAL_SESSIONS_DIR, `session_${sessionId}.db`);
+  const file = path.join(SESSIONS_DIR, `session_${sessionId}.db`);
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 

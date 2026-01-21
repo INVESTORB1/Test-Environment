@@ -16,9 +16,21 @@ async function initMongoIfConfigured() {
   if (mongoClient && mongoTestersColl) return { client: mongoClient, coll: mongoTestersColl };
   try {
     const { MongoClient } = require('mongodb');
-    mongoClient = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    // mongodb v4+ removed some legacy options; pass only the URI and let the driver
+    // choose sensible defaults. Also avoid using the WHATWG URL parser on
+    // mongodb+srv URIs which will throw — parse the DB name more defensively.
+    mongoClient = new MongoClient(MONGODB_URI);
     await mongoClient.connect();
-    const dbName = process.env.MONGODB_DB || (new URL(MONGODB_URI)).pathname.replace(/^\//, '') || 'test';
+    const dbName = process.env.MONGODB_DB || (function () {
+      try {
+        const u = new URL(MONGODB_URI);
+        return u.pathname ? u.pathname.replace(/^\//, '') : 'test';
+      } catch (e) {
+        // fallback: try to extract the path segment after the host
+        const m = String(MONGODB_URI).match(/\/([^/?]+)(?:[?]|$)/);
+        return (m && m[1]) ? m[1] : 'test';
+      }
+    })();
     const db = mongoClient.db(dbName);
   mongoTestersColl = db.collection('testers');
   mongoAdminTestersColl = db.collection('admin_testers');
